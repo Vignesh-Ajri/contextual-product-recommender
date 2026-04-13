@@ -1,0 +1,1063 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CPRP Admin Dashboard</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --bg: #0a0e1a;
+        --bg2: #111827;
+        --bg3: #1a2235;
+        --border: #1e2d45;
+        --accent: #3b82f6;
+        --accent2: #6366f1;
+        --green: #10b981;
+        --amber: #f59e0b;
+        --red: #ef4444;
+        --text: #e2e8f0;
+        --muted: #64748b;
+        --card-bg: #111827;
+      }
+
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: "Space Grotesk", sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        min-height: 100vh;
+      }
+
+      /* ── Sidebar ── */
+      .sidebar {
+        position: fixed;
+        left: 0;
+        top: 0;
+        width: 220px;
+        height: 100vh;
+        background: var(--bg2);
+        border-right: 1px solid var(--border);
+        padding: 24px 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        z-index: 100;
+      }
+
+      .logo {
+        padding: 12px 16px 24px;
+        border-bottom: 1px solid var(--border);
+        margin-bottom: 12px;
+      }
+
+      .logo h1 {
+        font-size: 18px;
+        font-weight: 700;
+        background: linear-gradient(135deg, var(--accent), var(--accent2));
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        letter-spacing: -0.5px;
+      }
+
+      .logo p {
+        font-size: 11px;
+        color: var(--muted);
+        margin-top: 2px;
+        font-family: "JetBrains Mono", monospace;
+      }
+
+      .nav-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 16px;
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 14px;
+        color: var(--muted);
+        transition: all 0.15s;
+        border: 1px solid transparent;
+      }
+
+      .nav-item:hover {
+        background: var(--bg3);
+        color: var(--text);
+      }
+      .nav-item.active {
+        background: rgba(59, 130, 246, 0.12);
+        color: var(--accent);
+        border-color: rgba(59, 130, 246, 0.2);
+      }
+
+      .nav-icon {
+        font-size: 16px;
+      }
+
+      .sidebar-footer {
+        margin-top: auto;
+        padding: 12px 16px;
+        border-top: 1px solid var(--border);
+        font-size: 11px;
+        color: var(--muted);
+        font-family: "JetBrains Mono", monospace;
+      }
+
+      /* ── Main ── */
+      .main {
+        margin-left: 220px;
+        padding: 32px;
+        min-height: 100vh;
+      }
+
+      .topbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 32px;
+      }
+
+      .topbar h2 {
+        font-size: 24px;
+        font-weight: 600;
+        letter-spacing: -0.5px;
+      }
+
+      .topbar span {
+        font-size: 13px;
+        color: var(--muted);
+        font-family: "JetBrains Mono", monospace;
+      }
+
+      .refresh-btn {
+        background: var(--bg3);
+        border: 1px solid var(--border);
+        color: var(--text);
+        padding: 8px 16px;
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 13px;
+        font-family: "Space Grotesk", sans-serif;
+        transition: all 0.15s;
+      }
+
+      .refresh-btn:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+
+      /* ── Section ── */
+      .section {
+        display: none;
+      }
+      .section.active {
+        display: block;
+      }
+
+      /* ── Stats cards ── */
+      .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 16px;
+        margin-bottom: 28px;
+      }
+
+      .stat-card {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 20px;
+        position: relative;
+        overflow: hidden;
+        transition: border-color 0.2s;
+      }
+
+      .stat-card:hover {
+        border-color: var(--accent);
+      }
+
+      .stat-card::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 2px;
+        background: linear-gradient(90deg, var(--accent), var(--accent2));
+      }
+
+      .stat-label {
+        font-size: 12px;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 8px;
+      }
+
+      .stat-value {
+        font-size: 32px;
+        font-weight: 700;
+        letter-spacing: -1px;
+        font-family: "JetBrains Mono", monospace;
+        color: var(--text);
+      }
+
+      .stat-sub {
+        font-size: 12px;
+        color: var(--muted);
+        margin-top: 4px;
+      }
+
+      .stat-card.green::before {
+        background: linear-gradient(90deg, var(--green), #34d399);
+      }
+      .stat-card.amber::before {
+        background: linear-gradient(90deg, var(--amber), #fbbf24);
+      }
+      .stat-card.purple::before {
+        background: linear-gradient(90deg, #8b5cf6, var(--accent2));
+      }
+
+      /* ── Table card ── */
+      .table-card {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        overflow: hidden;
+        margin-bottom: 24px;
+      }
+
+      .table-header {
+        padding: 16px 20px;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .table-header h3 {
+        font-size: 15px;
+        font-weight: 600;
+      }
+
+      .badge {
+        font-size: 11px;
+        padding: 3px 10px;
+        border-radius: 20px;
+        font-family: "JetBrains Mono", monospace;
+      }
+
+      .badge-blue {
+        background: rgba(59, 130, 246, 0.15);
+        color: var(--accent);
+      }
+      .badge-green {
+        background: rgba(16, 185, 129, 0.15);
+        color: var(--green);
+      }
+      .badge-amber {
+        background: rgba(245, 158, 11, 0.15);
+        color: var(--amber);
+      }
+      .badge-red {
+        background: rgba(239, 68, 68, 0.15);
+        color: var(--red);
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      th {
+        padding: 12px 16px;
+        text-align: left;
+        font-size: 11px;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        background: rgba(255, 255, 255, 0.02);
+        border-bottom: 1px solid var(--border);
+        font-weight: 500;
+      }
+
+      td {
+        padding: 12px 16px;
+        font-size: 13px;
+        border-bottom: 1px solid rgba(30, 45, 69, 0.5);
+        vertical-align: middle;
+      }
+
+      tr:last-child td {
+        border-bottom: none;
+      }
+      tr:hover td {
+        background: rgba(255, 255, 255, 0.02);
+      }
+
+      .mono {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 12px;
+      }
+
+      /* ── Score bar ── */
+      .score-bar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .bar-bg {
+        flex: 1;
+        height: 4px;
+        background: var(--border);
+        border-radius: 2px;
+        overflow: hidden;
+      }
+
+      .bar-fill {
+        height: 100%;
+        background: linear-gradient(90deg, var(--accent), var(--accent2));
+        border-radius: 2px;
+        transition: width 0.5s ease;
+      }
+
+      /* ── Category chart ── */
+      .chart-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+        margin-bottom: 24px;
+      }
+
+      .category-list {
+        padding: 8px 0;
+      }
+
+      .category-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 10px 20px;
+        border-bottom: 1px solid rgba(30, 45, 69, 0.4);
+      }
+
+      .category-row:last-child {
+        border-bottom: none;
+      }
+
+      .cat-name {
+        width: 120px;
+        font-size: 13px;
+        text-transform: capitalize;
+      }
+
+      .cat-bar-bg {
+        flex: 1;
+        height: 6px;
+        background: var(--border);
+        border-radius: 3px;
+        overflow: hidden;
+      }
+
+      .cat-bar-fill {
+        height: 100%;
+        background: linear-gradient(90deg, var(--accent), var(--accent2));
+        border-radius: 3px;
+      }
+
+      .cat-count {
+        font-size: 12px;
+        color: var(--muted);
+        font-family: "JetBrains Mono", monospace;
+        width: 40px;
+        text-align: right;
+      }
+
+      /* ── Pagination ── */
+      .pagination {
+        display: flex;
+        gap: 8px;
+        padding: 16px 20px;
+        border-top: 1px solid var(--border);
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .page-btn {
+        background: var(--bg3);
+        border: 1px solid var(--border);
+        color: var(--text);
+        padding: 6px 14px;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 13px;
+        font-family: "Space Grotesk", sans-serif;
+        transition: all 0.15s;
+      }
+
+      .page-btn:hover:not(:disabled) {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .page-btn:disabled {
+        opacity: 0.3;
+        cursor: not-allowed;
+      }
+
+      .page-info {
+        font-size: 13px;
+        color: var(--muted);
+      }
+
+      /* ── Loading ── */
+      .loading {
+        text-align: center;
+        padding: 48px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .pulse {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        background: var(--accent);
+        border-radius: 50%;
+        margin-right: 8px;
+        animation: pulse 1.5s infinite;
+      }
+
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+          transform: scale(1);
+        }
+        50% {
+          opacity: 0.4;
+          transform: scale(0.8);
+        }
+      }
+
+      /* ── Status dot ── */
+      .dot {
+        display: inline-block;
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        margin-right: 6px;
+      }
+      .dot-green {
+        background: var(--green);
+      }
+      .dot-red {
+        background: var(--red);
+      }
+      .dot-amber {
+        background: var(--amber);
+      }
+    </style>
+  </head>
+  <body>
+    <!-- ── Sidebar ── -->
+    <div class="sidebar">
+      <div class="logo">
+        <h1>CPRP</h1>
+        <p>admin dashboard</p>
+      </div>
+
+      <div class="nav-item active" onclick="showSection('overview')">
+        <span class="nav-icon">⬡</span> Overview
+      </div>
+      <div class="nav-item" onclick="showSection('profiles')">
+        <span class="nav-icon">◈</span> User Profiles
+      </div>
+      <div class="nav-item" onclick="showSection('notifications')">
+        <span class="nav-icon">◉</span> Notifications
+      </div>
+      <div class="nav-item" onclick="showSection('recommendations')">
+        <span class="nav-icon">◎</span> Recommendations
+      </div>
+
+      <div class="sidebar-footer">
+        v1.0 · RIT MCA 2025-26<br />
+        Vignesh · 1MS24MC105
+      </div>
+    </div>
+
+    <!-- ── Main Content ── -->
+    <div class="main">
+      <div class="topbar">
+        <div>
+          <h2 id="section-title">Overview</h2>
+          <span id="last-updated">Loading...</span>
+        </div>
+        <button class="refresh-btn" onclick="loadCurrentSection()">
+          ↺ Refresh
+        </button>
+      </div>
+
+      <!-- ── OVERVIEW ── -->
+      <div class="section active" id="section-overview">
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-label">Total Users</div>
+            <div class="stat-value" id="stat-users">—</div>
+            <div class="stat-sub">Unique profiles</div>
+          </div>
+          <div class="stat-card green">
+            <div class="stat-label">Interactions</div>
+            <div class="stat-value" id="stat-interactions">—</div>
+            <div class="stat-sub">Browse + purchase events</div>
+          </div>
+          <div class="stat-card amber">
+            <div class="stat-label">Notifications</div>
+            <div class="stat-value" id="stat-notifications">—</div>
+            <div class="stat-sub">Emails sent</div>
+          </div>
+          <div class="stat-card purple">
+            <div class="stat-label">Active Profiles</div>
+            <div class="stat-value" id="stat-active">—</div>
+            <div class="stat-sub">Not suppressed</div>
+          </div>
+        </div>
+
+        <div class="chart-grid">
+          <div class="table-card">
+            <div class="table-header">
+              <h3>Top Categories</h3>
+              <span class="badge badge-blue">by interest count</span>
+            </div>
+            <div class="category-list" id="category-chart">
+              <div class="loading"><span class="pulse"></span>Loading...</div>
+            </div>
+          </div>
+
+          <div class="table-card">
+            <div class="table-header">
+              <h3>System Info</h3>
+              <span class="badge badge-green">live</span>
+            </div>
+            <div
+              style="
+                padding: 20px;
+                display: flex;
+                flex-direction: column;
+                gap: 14px;
+              "
+            >
+              <div
+                style="
+                  display: flex;
+                  justify-content: space-between;
+                  align-items: center;
+                  padding-bottom: 12px;
+                  border-bottom: 1px solid var(--border);
+                "
+              >
+                <span style="font-size: 13px; color: var(--muted)"
+                  >Top Category</span
+                >
+                <span class="badge badge-blue" id="info-top-cat">—</span>
+              </div>
+              <div
+                style="
+                  display: flex;
+                  justify-content: space-between;
+                  align-items: center;
+                  padding-bottom: 12px;
+                  border-bottom: 1px solid var(--border);
+                "
+              >
+                <span style="font-size: 13px; color: var(--muted)"
+                  >Top Brand</span
+                >
+                <span
+                  class="badge badge-purple"
+                  id="info-top-brand"
+                  style="background: rgba(99, 102, 241, 0.15); color: #818cf8"
+                  >—</span
+                >
+              </div>
+              <div
+                style="
+                  display: flex;
+                  justify-content: space-between;
+                  align-items: center;
+                  padding-bottom: 12px;
+                  border-bottom: 1px solid var(--border);
+                "
+              >
+                <span style="font-size: 13px; color: var(--muted)"
+                  >ML Model</span
+                >
+                <span class="badge badge-green"
+                  ><span class="dot dot-green"></span>Loaded</span
+                >
+              </div>
+              <div
+                style="
+                  display: flex;
+                  justify-content: space-between;
+                  align-items: center;
+                  padding-bottom: 12px;
+                  border-bottom: 1px solid var(--border);
+                "
+              >
+                <span style="font-size: 13px; color: var(--muted)">Kafka</span>
+                <span class="badge badge-green"
+                  ><span class="dot dot-green"></span>Running</span
+                >
+              </div>
+              <div
+                style="
+                  display: flex;
+                  justify-content: space-between;
+                  align-items: center;
+                "
+              >
+                <span style="font-size: 13px; color: var(--muted)"
+                  >API Status</span
+                >
+                <span class="badge badge-green"
+                  ><span class="dot dot-green"></span>Online</span
+                >
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── USER PROFILES ── -->
+      <div class="section" id="section-profiles">
+        <div class="table-card">
+          <div class="table-header">
+            <h3>User Interest Profiles</h3>
+            <span class="badge badge-blue" id="profiles-count">Loading...</span>
+          </div>
+          <div id="profiles-table-body">
+            <div class="loading">
+              <span class="pulse"></span>Loading profiles...
+            </div>
+          </div>
+          <div class="pagination">
+            <span class="page-info" id="profiles-page-info">—</span>
+            <div style="display: flex; gap: 8px">
+              <button
+                class="page-btn"
+                id="profiles-prev"
+                onclick="changePage('profiles', -1)"
+                disabled
+              >
+                ← Prev
+              </button>
+              <button
+                class="page-btn"
+                id="profiles-next"
+                onclick="changePage('profiles', 1)"
+              >
+                Next →
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── NOTIFICATIONS ── -->
+      <div class="section" id="section-notifications">
+        <div class="table-card">
+          <div class="table-header">
+            <h3>Notifications Sent</h3>
+            <span class="badge badge-amber" id="notif-count">Loading...</span>
+          </div>
+          <div id="notifications-table-body">
+            <div class="loading">
+              <span class="pulse"></span>Loading notifications...
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── RECOMMENDATIONS ── -->
+      <div class="section" id="section-recommendations">
+        <div class="table-card">
+          <div class="table-header">
+            <h3>Test Recommendations</h3>
+            <span class="badge badge-blue">live query</span>
+          </div>
+          <div style="padding: 20px">
+            <p
+              style="font-size: 13px; color: var(--muted); margin-bottom: 16px"
+            >
+              Enter a user ID to see what the ML model recommends for them.
+            </p>
+            <div style="display: flex; gap: 12px; margin-bottom: 24px">
+              <input
+                id="rec-user-input"
+                type="text"
+                placeholder="Enter user_id (e.g. vignesh_demo)"
+                style="
+                  flex: 1;
+                  background: var(--bg3);
+                  border: 1px solid var(--border);
+                  color: var(--text);
+                  padding: 10px 14px;
+                  border-radius: 8px;
+                  font-size: 14px;
+                  font-family: &quot;Space Grotesk&quot;, sans-serif;
+                  outline: none;
+                "
+                onkeydown="if (event.key === 'Enter') fetchRecommendation();"
+              />
+              <button
+                onclick="fetchRecommendation()"
+                style="
+                  background: var(--accent);
+                  color: white;
+                  border: none;
+                  padding: 10px 20px;
+                  border-radius: 8px;
+                  cursor: pointer;
+                  font-size: 14px;
+                  font-family: &quot;Space Grotesk&quot;, sans-serif;
+                  font-weight: 500;
+                "
+              >
+                Get Recommendations
+              </button>
+            </div>
+            <div id="rec-result"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // ── State ─────────────────────────────────────────────────────
+      let currentSection = "overview";
+      let pages = { profiles: 1 };
+      let totals = { profiles: 0 };
+      const PER_PAGE = 20;
+
+      // ── Navigation ────────────────────────────────────────────────
+      function showSection(name) {
+        document
+          .querySelectorAll(".section")
+          .forEach((s) => s.classList.remove("active"));
+        document
+          .querySelectorAll(".nav-item")
+          .forEach((n) => n.classList.remove("active"));
+
+        document.getElementById(`section-${name}`).classList.add("active");
+        document.querySelectorAll(".nav-item").forEach((n) => {
+          if (n.textContent.toLowerCase().includes(name.substring(0, 4)))
+            n.classList.add("active");
+        });
+
+        const titles = {
+          overview: "Overview",
+          profiles: "User Profiles",
+          notifications: "Notifications",
+          recommendations: "Recommendations",
+        };
+        document.getElementById("section-title").textContent = titles[name];
+        currentSection = name;
+        loadSection(name);
+      }
+
+      function loadCurrentSection() {
+        loadSection(currentSection);
+      }
+
+      function loadSection(name) {
+        document.getElementById("last-updated").textContent =
+          "Updated: " + new Date().toLocaleTimeString();
+
+        if (name === "overview") loadOverview();
+        if (name === "profiles") loadProfiles();
+        if (name === "notifications") loadNotifications();
+      }
+
+      // ── Overview ──────────────────────────────────────────────────
+      async function loadOverview() {
+        try {
+          const r = await fetch("/api/stats");
+          const d = await r.json();
+
+          document.getElementById("stat-users").textContent =
+            d.total_users?.toLocaleString() || "0";
+          document.getElementById("stat-interactions").textContent =
+            d.total_interactions?.toLocaleString() || "0";
+          document.getElementById("stat-notifications").textContent =
+            d.total_notifications?.toLocaleString() || "0";
+          document.getElementById("stat-active").textContent =
+            d.active_profiles?.toLocaleString() || "0";
+          document.getElementById("info-top-cat").textContent =
+            d.top_category || "—";
+          document.getElementById("info-top-brand").textContent =
+            d.top_brand || "—";
+        } catch (e) {
+          console.error("Stats error:", e);
+        }
+
+        try {
+          const r = await fetch("/api/dashboard/categories");
+          const d = await r.json();
+          const cats = d.categories || [];
+          const max = cats[0]?.count || 1;
+
+          document.getElementById("category-chart").innerHTML =
+            cats
+              .map(
+                (c) => `
+      <div class="category-row">
+        <span class="cat-name">${c.main_category}</span>
+        <div class="cat-bar-bg">
+          <div class="cat-bar-fill" style="width:${((c.count / max) * 100).toFixed(0)}%"></div>
+        </div>
+        <span class="cat-count">${c.count}</span>
+      </div>
+    `,
+              )
+              .join("") || '<div class="loading">No data yet</div>';
+        } catch (e) {
+          console.error("Categories error:", e);
+        }
+      }
+
+      // ── Profiles ──────────────────────────────────────────────────
+      async function loadProfiles() {
+        const page = pages.profiles;
+        document.getElementById("profiles-table-body").innerHTML =
+          '<div class="loading"><span class="pulse"></span>Loading...</div>';
+
+        try {
+          const r = await fetch(
+            `/api/dashboard/profiles?page=${page}&per_page=${PER_PAGE}`,
+          );
+          const d = await r.json();
+          totals.profiles = d.total || 0;
+
+          document.getElementById("profiles-count").textContent =
+            `${totals.profiles} profiles`;
+          document.getElementById("profiles-page-info").textContent =
+            `Page ${page} of ${Math.ceil(totals.profiles / PER_PAGE)} · ${totals.profiles} total`;
+
+          document.getElementById("profiles-prev").disabled = page <= 1;
+          document.getElementById("profiles-next").disabled =
+            page >= Math.ceil(totals.profiles / PER_PAGE);
+
+          if (!d.profiles?.length) {
+            document.getElementById("profiles-table-body").innerHTML =
+              '<div class="loading">No profiles yet — run the Kafka consumer first</div>';
+            return;
+          }
+
+          document.getElementById("profiles-table-body").innerHTML = `
+      <table>
+        <thead>
+          <tr>
+            <th>Core ID</th>
+            <th>Category</th>
+            <th>Brand</th>
+            <th>Price Range</th>
+            <th>Interest Score</th>
+            <th>Views</th>
+            <th>Purchases</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${d.profiles
+            .map(
+              (p) => `
+            <tr>
+              <td class="mono">${p.core_id}</td>
+              <td><span style="text-transform:capitalize">${p.main_category}</span></td>
+              <td><span style="text-transform:capitalize">${p.brand}</span></td>
+              <td class="mono">${p.price_range}</td>
+              <td>
+                <div class="score-bar">
+                  <div class="bar-bg">
+                    <div class="bar-fill" style="width:${Math.min(p.interest_score * 10, 100).toFixed(0)}%"></div>
+                  </div>
+                  <span class="mono" style="font-size:11px;width:32px">${p.interest_score?.toFixed(1)}</span>
+                </div>
+              </td>
+              <td class="mono">${p.browse_count}</td>
+              <td class="mono">${p.purchase_count}</td>
+              <td>
+                ${
+                  p.suppressed
+                    ? `<span class="badge badge-amber"><span class="dot dot-amber"></span>Suppressed</span>`
+                    : `<span class="badge badge-green"><span class="dot dot-green"></span>Active</span>`
+                }
+              </td>
+            </tr>
+          `,
+            )
+            .join("")}
+        </tbody>
+      </table>
+    `;
+        } catch (e) {
+          document.getElementById("profiles-table-body").innerHTML =
+            '<div class="loading">Error loading profiles — is the API running?</div>';
+        }
+      }
+
+      function changePage(type, delta) {
+        pages[type] = Math.max(1, pages[type] + delta);
+        if (type === "profiles") loadProfiles();
+      }
+
+      // ── Notifications ─────────────────────────────────────────────
+      async function loadNotifications() {
+        document.getElementById("notifications-table-body").innerHTML =
+          '<div class="loading"><span class="pulse"></span>Loading...</div>';
+
+        try {
+          const r = await fetch("/api/dashboard/notifications");
+          const d = await r.json();
+          const notifs = d.notifications || [];
+
+          document.getElementById("notif-count").textContent =
+            `${notifs.length} recent`;
+
+          if (!notifs.length) {
+            document.getElementById("notifications-table-body").innerHTML =
+              '<div class="loading">No notifications sent yet — run notifications/notify.py</div>';
+            return;
+          }
+
+          document.getElementById("notifications-table-body").innerHTML = `
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>User</th>
+            <th>Channel</th>
+            <th>Message</th>
+            <th>Products</th>
+            <th>Status</th>
+            <th>Sent At</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${notifs
+            .map(
+              (n) => `
+            <tr>
+              <td class="mono">#${n.notification_id}</td>
+              <td class="mono">${n.core_id}</td>
+              <td><span class="badge badge-blue">${n.channel}</span></td>
+              <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--muted)">${n.message}</td>
+              <td style="font-size:12px;color:var(--muted)">${n.product_ids || "—"}</td>
+              <td>
+                ${
+                  n.status === "sent"
+                    ? `<span class="badge badge-green"><span class="dot dot-green"></span>Sent</span>`
+                    : `<span class="badge badge-red"><span class="dot dot-red"></span>Failed</span>`
+                }
+              </td>
+              <td style="font-size:12px;color:var(--muted)">${n.sent_at?.substring(0, 16) || "—"}</td>
+            </tr>
+          `,
+            )
+            .join("")}
+        </tbody>
+      </table>
+    `;
+        } catch (e) {
+          document.getElementById("notifications-table-body").innerHTML =
+            '<div class="loading">Error loading notifications</div>';
+        }
+      }
+
+      // ── Recommendations ───────────────────────────────────────────
+      async function fetchRecommendation() {
+        const userId = document.getElementById("rec-user-input").value.trim();
+        if (!userId) return;
+
+        document.getElementById("rec-result").innerHTML =
+          '<div class="loading"><span class="pulse"></span>Fetching recommendations...</div>';
+
+        try {
+          // Get token first
+          const loginRes = await fetch("/api/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ username: "admin", password: "admin123" }),
+          });
+          const loginData = await loginRes.json();
+          const token = loginData.token;
+
+          const r = await fetch(`/api/recommend/${userId}`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          const d = await r.json();
+
+          if (d.suppressed) {
+            document.getElementById("rec-result").innerHTML = `
+        <div style="padding:16px;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2);border-radius:8px">
+          <p style="color:var(--amber);font-size:14px">⚠️ User is in suppression period</p>
+          <p style="color:var(--muted);font-size:12px;margin-top:4px">${d.message}</p>
+        </div>`;
+            return;
+          }
+
+          if (!d.recommendations?.length) {
+            document.getElementById("rec-result").innerHTML = `
+        <div style="padding:16px;background:var(--bg3);border:1px solid var(--border);border-radius:8px">
+          <p style="color:var(--muted);font-size:14px">${d.message || "No recommendations found for this user"}</p>
+        </div>`;
+            return;
+          }
+
+          document.getElementById("rec-result").innerHTML = `
+      <div style="margin-bottom:12px;padding:12px 16px;background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.2);border-radius:8px">
+        <p style="font-size:13px;color:var(--muted)">Top interest: 
+          <span style="color:var(--text)">${d.top_interest?.category} · ${d.top_interest?.brand} · ${d.top_interest?.price_range}</span>
+          &nbsp;·&nbsp; Score: <span class="mono" style="color:var(--accent)">${d.top_interest?.score?.toFixed(1)}</span>
+        </p>
+      </div>
+      <table>
+        <thead>
+          <tr><th>#</th><th>Category</th><th>Brand</th><th>Price Range</th></tr>
+        </thead>
+        <tbody>
+          ${d.recommendations
+            .map(
+              (r, i) => `
+            <tr>
+              <td class="mono">${i + 1}</td>
+              <td style="text-transform:capitalize">${r.main_category}</td>
+              <td style="text-transform:capitalize">${r.brand}</td>
+              <td class="mono">${r.price_range}</td>
+            </tr>
+          `,
+            )
+            .join("")}
+        </tbody>
+      </table>
+    `;
+        } catch (e) {
+          document.getElementById("rec-result").innerHTML =
+            '<div class="loading">Error — is the API running on port 5000?</div>';
+        }
+      }
+
+      // ── Init ──────────────────────────────────────────────────────
+      loadOverview();
+    </script>
+  </body>
+</html>
