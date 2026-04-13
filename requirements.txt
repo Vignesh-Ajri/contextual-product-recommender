@@ -1,0 +1,14 @@
+# ── Python packages needed for the entire project ──
+# Install all at once with:
+# pip install -r requirements.txt
+
+pandas
+kafka-python
+mysql-connector-python
+flask
+flask-jwt-extended
+scikit-learn
+joblib
+sendgrid
+python-dotenv
+requests
