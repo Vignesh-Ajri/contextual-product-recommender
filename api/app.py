@@ -63,15 +63,17 @@ def get_db():
 # We don't reload it on every request (that would be slow)
 print("Loading ML model...")
 try:
+    import numpy as np
     tfidf             = joblib.load("ml/tfidf.pkl")
     similarity_matrix = joblib.load("ml/cosine_sim.pkl")
     products_df       = pd.read_csv("ml/products.csv")
+    collab_data       = joblib.load("ml/collab.pkl")
     model_data        = True   # just marks model as loaded
 
-    print(f"✅ Model loaded — {len(products_df)} products in catalog")
+    print(f"Hybrid model loaded — {len(products_df)} products")
 except FileNotFoundError:
-    print("⚠️  Model not found. Run ml/train_model.py first!")
-    print("    API will start but /recommend endpoint won't work until model is trained")
+    print("Model not found. Run ml/hybrid_model.py first!")
+    print("API will start but /recommend endpoint won't work until model is trained")
     model_data = None
 
 
@@ -113,39 +115,62 @@ def get_lifetime(cursor, category):
 
 # ── 6. Helper: get recommendations from model ─────────────────
 def find_similar_products(category, brand, price_range, top_n=5):
-    """
-    Use the trained ML model to find similar products.
-    Returns a list of product dicts.
-    """
+    '''
+    Hybrid recommendation:
+    50% Content-Based (TF-IDF cosine similarity)
+    50% Collaborative Filtering (item-item similarity)
+    '''
     if model_data is False:
         return []
-
-    # Find matching product in catalog
+ 
+    # ── Content-Based scores ──────────────────────────────────
+    content_scores = np.zeros(len(products_df))
+ 
     match = products_df[
         (products_df["main_category"] == category) &
         (products_df["brand"]         == brand)
     ]
-
-    # Fall back to category only if brand not found
     if len(match) == 0:
         match = products_df[products_df["main_category"] == category]
-
-    if len(match) == 0:
-        return []
-
-    idx = match.index[0]
-
-    # Get similarity scores, sort highest first
-    scores = list(enumerate(similarity_matrix[idx]))
-    scores = sorted(scores, key=lambda x: x[1], reverse=True)
-    scores = [s for s in scores if s[0] != idx]   # remove self
-
-    top_indices = [s[0] for s in scores[:top_n]]
-
-    return products_df.iloc[top_indices][
-        ["product_id", "main_category", "brand", "price_range"]
-    ].to_dict("records")
-
+ 
+    if len(match) > 0:
+        idx = match.index[0]
+        content_scores = similarity_matrix[idx]
+ 
+    # ── Collaborative scores ──────────────────────────────────
+    collab_scores = np.zeros(len(products_df))
+    item_key      = f"{category}_{brand}"
+ 
+    if item_key in collab_data["item_keys"]:
+        item_idx   = collab_data["item_enc"].transform([item_key])[0]
+        raw_collab = collab_data["item_sim_matrix"][item_idx]
+ 
+        for i, prod in products_df.iterrows():
+            pk = f"{prod['main_category']}_{prod['brand']}"
+            if pk in collab_data["item_keys"]:
+                ci = collab_data["item_enc"].transform([pk])[0]
+                collab_scores[i] = raw_collab[ci]
+ 
+    # ── Hybrid score = 50/50 mix ──────────────────────────────
+    hybrid_scores = (0.5 * content_scores) + (0.5 * collab_scores)
+ 
+    # Build results — skip exact same product
+    results = []
+    for i in np.argsort(hybrid_scores)[::-1]:
+        prod = products_df.iloc[i]
+        if prod["main_category"] == category and prod["brand"] == brand:
+            continue
+        results.append({
+            "product_id":    int(prod["product_id"]),
+            "main_category": str(prod["main_category"]),
+            "brand":         str(prod["brand"]),
+            "price_range":   str(prod["price_range"]),
+            "hybrid_score":  round(float(hybrid_scores[i]), 3)
+        })
+        if len(results) >= top_n:
+            break
+ 
+    return results
 
 # ══════════════════════════════════════════════════════════════
 # ENDPOINT 1: Login (get JWT token)
