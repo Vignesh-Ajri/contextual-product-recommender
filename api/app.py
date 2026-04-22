@@ -23,18 +23,47 @@
 # Test with: Postman or browser
 # ============================================================
 
+import re
 import pandas as pd
 import joblib                              # load saved ML model
 import uuid                                # generate unique IDs
 import mysql.connector                     # connect to MySQL
 from datetime import datetime, timedelta   # date calculations
+from collections import defaultdict
 from flask import Flask, request, jsonify, send_from_directory  # web framework
 from flask_jwt_extended import (           # JWT authentication
     JWTManager, jwt_required, create_access_token, get_jwt_identity
 )
+from flask_swagger_ui import get_swaggerui_blueprint
 import os
 from dotenv import load_dotenv
 load_dotenv()
+
+# ── Input validation constants ────────────────────────────────
+MAX_FIELD_LENGTH = 200
+ALLOWED_EVENT_TYPES = {"view", "cart", "purchase"}
+
+# Simple rate limiter: {ip: [timestamps]}
+_rate_limit_store = defaultdict(list)
+RATE_LIMIT_MAX = 60       # max requests
+RATE_LIMIT_WINDOW = 60    # per N seconds
+
+def check_rate_limit(ip):
+    """Return True if rate limit exceeded."""
+    now = datetime.now().timestamp()
+    _rate_limit_store[ip] = [t for t in _rate_limit_store[ip] if now - t < RATE_LIMIT_WINDOW]
+    if len(_rate_limit_store[ip]) >= RATE_LIMIT_MAX:
+        return True
+    _rate_limit_store[ip].append(now)
+    return False
+
+def sanitize_string(value, max_len=MAX_FIELD_LENGTH):
+    """Sanitize input: strip, truncate, remove control chars."""
+    if not value or not isinstance(value, str):
+        return ""
+    value = value.strip()[:max_len]
+    value = re.sub(r'[\x00-\x1f\x7f]', '', value)
+    return value
 
 # ── 1. App setup ──────────────────────────────────────────────
 app = Flask(__name__)
@@ -120,7 +149,7 @@ def find_similar_products(category, brand, price_range, top_n=5):
     50% Content-Based (TF-IDF cosine similarity)
     50% Collaborative Filtering (item-item similarity)
     '''
-    if model_data is False:
+    if model_data is None:
         return []
  
     # ── Content-Based scores ──────────────────────────────────
@@ -217,18 +246,34 @@ def login():
 @app.route("/api/event", methods=["POST"])
 @jwt_required()
 def receive_event():
-    data = request.get_json()
+    # Rate limit check
+    if check_rate_limit(request.remote_addr):
+        return jsonify({"error": "Too many requests. Please slow down."}), 429
 
-    # Validate required fields
-    if not data or "user_id" not in data:
-        return jsonify({"error": "user_id is required"}), 400
+    data = request.get_json(silent=True)
 
-    user_id    = data.get("user_id")
-    event_type = data.get("event_type",  "view")
-    category   = data.get("category",    "unknown")
-    brand      = data.get("brand",       "unknown")
-    price_range = data.get("price_range", "unknown")
+    # Handle missing/malformed JSON body
+    if not data or not isinstance(data, dict):
+        return jsonify({"error": "Valid JSON body is required"}), 400
 
+    if "user_id" not in data or not data["user_id"]:
+        return jsonify({"error": "user_id is required and cannot be empty"}), 400
+
+    # Sanitize and validate inputs
+    user_id     = sanitize_string(str(data.get("user_id", "")), 100)
+    event_type  = sanitize_string(data.get("event_type", "view"))
+    category    = sanitize_string(data.get("category", "unknown"))
+    brand       = sanitize_string(data.get("brand", "unknown"))
+    price_range = sanitize_string(data.get("price_range", "unknown"))
+
+    if not user_id:
+        return jsonify({"error": "user_id cannot be empty after sanitization"}), 400
+
+    if event_type not in ALLOWED_EVENT_TYPES:
+        return jsonify({"error": f"Invalid event_type. Must be one of: {', '.join(ALLOWED_EVENT_TYPES)}"}), 400
+
+    conn = None
+    cursor = None
     try:
         conn   = get_db()
         cursor = conn.cursor()
@@ -299,8 +344,6 @@ def receive_event():
             ))
 
         conn.commit()
-        cursor.close()
-        conn.close()
 
         return jsonify({
             "success":  True,
@@ -310,6 +353,14 @@ def receive_event():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+    finally:
+        if cursor:
+            try: cursor.close()
+            except: pass
+        if conn:
+            try: conn.close()
+            except: pass
 
 
 # ══════════════════════════════════════════════════════════════
@@ -498,7 +549,6 @@ def get_profile(user_id):
 # ============================================================
 
 # ── Dashboard stats (top 4 cards) ────────────────────────────
-@jwt_required()
 @app.route("/api/stats", methods=["GET"])
 def get_stats():
     """Returns summary counts for dashboard cards."""
@@ -697,6 +747,300 @@ def dashboard_categories():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+
+# ══════════════════════════════════════════════════════════════
+# ENDPOINT 5: Feedback from notification
+# POST /api/feedback
+# Headers: Authorization: Bearer <token>
+#
+# Body:
+# {
+#   "user_id":   "vignesh_001",
+#   "category":  "electronics",
+#   "brand":     "samsung",
+#   "action":    "clicked"       # clicked / ignored / dismissed
+# }
+#
+# Called by XYZ company when user interacts with notification.
+# ══════════════════════════════════════════════════════════════
+@app.route("/api/feedback", methods=["POST"])
+@jwt_required()
+def receive_feedback():
+    data     = request.get_json()
+    user_id  = data.get("user_id")
+    category = data.get("category", "unknown")
+    brand    = data.get("brand",    "unknown")
+    action   = data.get("action",   "ignored")   # clicked/ignored/dismissed
+
+    if not user_id:
+        return jsonify({"error": "user_id required"}), 400
+
+    # Score change based on action
+    # clicked   = user is interested → boost score
+    # ignored   = mild disinterest → small penalty
+    # dismissed = strong disinterest → big penalty + suppress
+    score_delta_map = {
+        "clicked":   +1.0,
+        "ignored":   -0.5,
+        "dismissed": -1.0
+    }
+    score_delta = score_delta_map.get(action, -0.5)
+
+    try:
+        conn   = get_db()
+        cursor = conn.cursor(dictionary=True)
+
+        # Resolve identity
+        cursor2 = conn.cursor()
+        core_id = resolve_identity(cursor2, user_id)
+        conn.commit()
+        cursor2.close()
+
+        # Get current profile
+        cursor.execute('''
+            SELECT profile_id, interest_score, browse_count
+            FROM interest_profiles
+            WHERE core_id=%s AND main_category=%s AND brand=%s
+        ''', (core_id, category, brand))
+
+        profile = cursor.fetchone()
+
+        if profile:
+            new_score = max(0, profile["interest_score"] + score_delta)
+            # max(0,...) ensures score never goes below 0
+
+            suppress_until = None
+            if action == "dismissed":
+                # Suppress for 7 days after dismissal
+                suppress_until = datetime.now() + timedelta(days=7)
+                print(f"  🔇 User dismissed {category}/{brand} — suppressing 7 days")
+
+            cursor.execute('''
+                UPDATE interest_profiles
+                SET interest_score = %s,
+                    suppress_until = %s,
+                    updated_at     = NOW()
+                WHERE profile_id = %s
+            ''', (new_score, suppress_until, profile["profile_id"]))
+
+        else:
+            # No profile yet — create one with the delta as starting score
+            new_score = max(0, 1.0 + score_delta)
+            cursor.execute('''
+                INSERT INTO interest_profiles
+                    (core_id, main_category, brand, interest_score)
+                VALUES (%s, %s, %s, %s)
+            ''', (core_id, category, brand, new_score))
+
+        # Update notification status if exists
+        cursor.execute('''
+            UPDATE notifications
+            SET status = %s
+            WHERE core_id = %s
+              AND message LIKE %s
+            ORDER BY sent_at DESC
+            LIMIT 1
+        ''', (action, core_id, f"%{category}%"))
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        return jsonify({
+            "success":    True,
+            "user_id":    user_id,
+            "action":     action,
+            "new_score":  round(new_score, 2),
+            "message":    f"Feedback recorded — score updated to {round(new_score,2)}"
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+
+# ============================================================
+# Swagger API Documentation
+# File: api/swagger_setup.py
+#
+# What this does:
+# - Adds a professional API docs page at /docs
+# - Shows all endpoints, request format, response format
+# - Interactive — you can test endpoints directly from browser
+#
+# STEP 1: Install
+#   pip install flask-swagger-ui
+#
+# STEP 2: Paste into api/app.py (after app = Flask(__name__))
+# ============================================================
+
+
+# ── ADD AFTER app = Flask(__name__) ──────────────────────────
+
+SWAGGER_URL  = '/docs'           # URL for swagger UI
+API_URL      = '/swagger.json'   # URL for swagger spec
+
+swaggerui_blueprint = get_swaggerui_blueprint(
+    SWAGGER_URL,
+    API_URL,
+    config={'app_name': "CPRP API"}
+)
+app.register_blueprint(swaggerui_blueprint, url_prefix=SWAGGER_URL)
+
+
+# ── ADD THIS ENDPOINT anywhere in app.py ─────────────────────
+
+@app.route('/swagger.json')
+def swagger_spec():
+    return jsonify({
+        "swagger": "2.0",
+        "info": {
+            "title":       "CPRP — Contextual Product Recommender API",
+            "description": "Mini Epsilon-style platform for user profiling and product recommendations",
+            "version":     "1.0.0",
+            "contact": {
+                "name":  "Vignesh",
+                "email": "1MS24MC105@msrit.edu"
+            }
+        },
+        "host":     "localhost:5000",
+        "basePath": "/",
+        "schemes":  ["http"],
+        "securityDefinitions": {
+            "Bearer": {
+                "type": "apiKey",
+                "name": "Authorization",
+                "in":   "header",
+                "description": "JWT token. Format: Bearer <token>"
+            }
+        },
+        "paths": {
+            "/api/login": {
+                "post": {
+                    "summary":     "Get JWT token",
+                    "description": "Login with admin credentials to get access token",
+                    "parameters": [{
+                        "in": "body", "name": "body",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "username": {"type": "string", "example": "admin"},
+                                "password": {"type": "string", "example": "admin123"}
+                            }
+                        }
+                    }],
+                    "responses": {
+                        "200": {"description": "Returns JWT token"},
+                        "401": {"description": "Invalid credentials"}
+                    }
+                }
+            },
+            "/api/event": {
+                "post": {
+                    "summary":     "Send user event",
+                    "description": "XYZ company sends a browse/purchase event for a user",
+                    "security":    [{"Bearer": []}],
+                    "parameters": [{
+                        "in": "body", "name": "body",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "user_id":    {"type": "string",  "example": "user123"},
+                                "event_type": {"type": "string",  "example": "purchase"},
+                                "category":   {"type": "string",  "example": "electronics"},
+                                "brand":      {"type": "string",  "example": "samsung"},
+                                "price_range":{"type": "string",  "example": "50k-70k"},
+                                "email":      {"type": "string",  "example": "user@gmail.com"}
+                            }
+                        }
+                    }],
+                    "responses": {
+                        "200": {"description": "Event recorded, profile updated"},
+                        "400": {"description": "Missing user_id"}
+                    }
+                }
+            },
+            "/api/recommend/{user_id}": {
+                "get": {
+                    "summary":     "Get recommendations",
+                    "description": "Returns personalized product recommendations for a user",
+                    "security":    [{"Bearer": []}],
+                    "parameters": [{
+                        "in": "path", "name": "user_id",
+                        "type": "string", "required": True,
+                        "description": "The user ID to get recommendations for"
+                    }],
+                    "responses": {
+                        "200": {"description": "List of recommended products"}
+                    }
+                }
+            },
+            "/api/profile/{user_id}": {
+                "get": {
+                    "summary":     "Get user profile",
+                    "description": "Returns the 360-degree interest profile for a user",
+                    "security":    [{"Bearer": []}],
+                    "parameters": [{
+                        "in": "path", "name": "user_id",
+                        "type": "string", "required": True
+                    }],
+                    "responses": {
+                        "200": {"description": "Full user profile with interest scores"}
+                    }
+                }
+            },
+            "/api/feedback": {
+                "post": {
+                    "summary":     "Send notification feedback",
+                    "description": "User clicked/ignored/dismissed a recommendation",
+                    "security":    [{"Bearer": []}],
+                    "parameters": [{
+                        "in": "body", "name": "body",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "user_id":  {"type": "string", "example": "user123"},
+                                "category": {"type": "string", "example": "electronics"},
+                                "brand":    {"type": "string", "example": "samsung"},
+                                "action":   {"type": "string", "example": "clicked",
+                                             "enum": ["clicked", "ignored", "dismissed"]}
+                            }
+                        }
+                    }],
+                    "responses": {
+                        "200": {"description": "Feedback recorded, score updated"}
+                    }
+                }
+            },
+            "/api/health": {
+                "get": {
+                    "summary":  "Health check",
+                    "responses": {"200": {"description": "API is running"}}
+                }
+            }
+        }
+    })
+
+# ── Serve dashboard files ─────────────────────────────────────
+import pathlib
+_PROJECT_ROOT = str(pathlib.Path(__file__).resolve().parent.parent)
+
+@app.route("/dashboard")
+def dashboard():
+    """Serves the dashboard HTML file."""
+    return send_from_directory(_PROJECT_ROOT, "dashboard.html")
+
+@app.route("/dashboard.css")
+def dashboard_css():
+    """Serves the dashboard CSS file."""
+    return send_from_directory(_PROJECT_ROOT, "dashboard.css")
+
+@app.route("/dashboard.js")
+def dashboard_js():
+    """Serves the dashboard JS file."""
+    return send_from_directory(_PROJECT_ROOT, "dashboard.js")
 
 
 # ── 7. Health check ───────────────────────────────────────────
