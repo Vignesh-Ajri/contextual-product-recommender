@@ -1,0 +1,45 @@
+\begin{tikzpicture}[
+    node distance=1.5cm and 2cm,
+    box/.style={rectangle, draw, rounded corners, align=center, fill=blue!10, minimum width=2.5cm, minimum height=1cm, font=\small},
+    db/.style={cylinder, draw, shape border rotate=90, aspect=0.25, align=center, fill=orange!10, minimum width=2cm, minimum height=1.5cm, font=\small},
+    arrow/.style={-latex, thick}
+]
+
+% Nodes
+\node[box] (web) {Web Apps};
+\node[box, below=0.5cm of web] (mobile) {Mobile Apps};
+\node[box, below=0.5cm of mobile] (external) {Ext. Partners};
+
+\node[box, right=2cm of mobile, fill=green!10] (kafka) {Kafka \\ (Message Broker)};
+
+\node[box, right=2cm of kafka, fill=purple!10] (stream) {Stream Processor};
+
+\node[box, above=1cm of stream, fill=yellow!10] (id_res) {Identity \\ Resolution};
+\node[box, below=1cm of stream, fill=yellow!10] (interest) {Interest \\ Modeling};
+
+\node[db, right=2cm of id_res] (mysql) {MySQL DB \\ (Profiles)};
+\node[db, right=2cm of interest] (model_db) {ML Models \\ (TF-IDF/K-Means)};
+
+\node[box, right=2cm of stream, fill=red!10] (rec_engine) {Recommendation \\ Engine};
+
+\node[box, right=2cm of rec_engine, fill=teal!10] (api) {REST API \\ (Delivery)};
+
+% Edges
+\draw[arrow] (web) -- (kafka);
+\draw[arrow] (mobile) -- (kafka);
+\draw[arrow] (external) -- (kafka);
+
+\draw[arrow] (kafka) -- (stream);
+
+\draw[arrow] (stream) -- (id_res);
+\draw[arrow] (stream) -- (interest);
+
+\draw[arrow] (id_res) -- (mysql);
+\draw[arrow] (interest) -- (mysql);
+
+\draw[arrow] (mysql) -- (rec_engine);
+\draw[arrow] (model_db) -- (rec_engine);
+
+\draw[arrow] (rec_engine) -- (api);
+
+\end{tikzpicture}
