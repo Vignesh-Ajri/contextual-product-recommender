@@ -1,37 +1,14 @@
-# ============================================================
-# STEP 4 - Kafka Consumer + Profile Builder
-# File: kafka/consumer.py
-#
-# What this does:
-# - Listens to Kafka topic "user_events" continuously
-# - For each event received:
-#     1. Creates/finds a user in MySQL (Identity Resolution)
-#     2. Saves the interaction (view/cart/purchase)
-#     3. Updates the user's interest profile (4 parameters)
-#     4. If purchase → sets suppression date using product lifetime
-# - Think of it as: "postman picking up letters and delivering them"
-#
-# Edge cases handled:
-#   - Malformed Kafka messages (missing fields validated)
-#   - MySQL reconnection on connection drops
-#   - Dead-letter logging for events that fail 3 times
-#
-# Run this BEFORE producer.py (start the postman before letters arrive)
-# Command: python kafka/consumer.py
-# ============================================================
-
-import json           # json = parse incoming Kafka messages
-import uuid           # uuid = generate unique IDs for new users
+import json
+import uuid
 import logging
 import time
-import mysql.connector  # mysql.connector = connect to MySQL database
-from datetime import datetime, timedelta  # for date calculations
-from kafka import KafkaConsumer           # KafkaConsumer = listens to Kafka
+import mysql.connector
+from datetime import datetime, timedelta
+from kafka import KafkaConsumer
 import os
 from dotenv import load_dotenv
 load_dotenv()
 
-# ── Logging setup ─────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -39,72 +16,52 @@ logging.basicConfig(
 )
 logger = logging.getLogger("consumer")
 
-# ── 1. Configuration ──────────────────────────────────────────
-KAFKA_SERVER = "localhost:9092"    # Kafka address
-TOPIC_NAME   = "user_events"       # same topic the producer sends to
-GROUP_ID     = "cprp_consumer"     # consumer group name (can be anything)
+KAFKA_SERVER    = "localhost:9092"
+TOPIC_NAME      = "user_events"
+GROUP_ID        = "cprp_consumer"
+MAX_DB_RETRIES  = 3
+DB_RETRY_DELAY  = 2
+MAX_EVENT_RETRIES = 3
 
-# MySQL connection settings
 DB_CONFIG = {
-    "host": os.getenv("DB_HOST"),
-    "port": os.getenv("DB_PORT"),
-    "user": os.getenv("DB_USER"),
-    "password": os.getenv("DB_PASSWORD"),
-    "database": os.getenv("DB_NAME")
+    "host":     os.getenv("DB_HOST",     "localhost"),
+    "port":     int(os.getenv("DB_PORT", 3306)),
+    "user":     os.getenv("DB_USER",     "root"),
+    "password": os.getenv("DB_PASSWORD", ""),
+    "database": os.getenv("DB_NAME",     "cprp")
 }
 
-# Retry/resilience config
-MAX_DB_RETRIES = 3
-DB_RETRY_DELAY = 2         # seconds (base for exponential backoff)
-MAX_EVENT_RETRIES = 3       # max retries per event before dead-lettering
-
-# Required fields in Kafka messages
-REQUIRED_FIELDS = ["user_id"]
-OPTIONAL_FIELDS = {
-    "event_type":    "view",
-    "main_category": "unknown",
-    "brand":         "unknown",
-    "price_range":   "unknown",
-    "event_time":    None,        # will default to now()
-    "source":        "kaggle"
+SCORE_WEIGHTS = {
+    "view":     {"interest": 0.5, "browse": 0.5,  "engagement": 0.0, "purchase": 0.0},
+    "search":   {"interest": 0.3, "browse": 0.2,  "engagement": 0.3, "purchase": 0.0},
+    "cart":     {"interest": 1.0, "browse": 0.0,  "engagement": 1.0, "purchase": 0.0},
+    "click":    {"interest": 0.4, "browse": 0.0,  "engagement": 0.4, "purchase": 0.0},
+    "purchase": {"interest": 2.0, "browse": 0.0,  "engagement": 0.5, "purchase": 2.0},
+    "dismiss":  {"interest": -1.0,"browse": 0.0,  "engagement": 0.0, "purchase": 0.0},
 }
 
-
-# ── 2. Connect to MySQL with reconnect logic ─────────────────
 _db_conn = None
 
 def get_db_connection():
-    """Create and return a MySQL connection with retry logic."""
     global _db_conn
-
-    # Check if existing connection is alive
     try:
         if _db_conn is not None and _db_conn.is_connected():
             _db_conn.ping(reconnect=True, attempts=1, delay=0)
             return _db_conn
     except Exception:
-        logger.warning("Existing DB connection lost, reconnecting...")
         _db_conn = None
 
-    # Retry connection with exponential backoff
     for attempt in range(1, MAX_DB_RETRIES + 1):
         try:
             _db_conn = mysql.connector.connect(**DB_CONFIG)
-            logger.info("MySQL connected")
             return _db_conn
         except mysql.connector.Error as e:
-            logger.warning(f"DB connect attempt {attempt}/{MAX_DB_RETRIES} failed: {e}")
             if attempt < MAX_DB_RETRIES:
-                delay = DB_RETRY_DELAY ** attempt
-                logger.info(f"Retrying in {delay}s...")
-                time.sleep(delay)
+                time.sleep(DB_RETRY_DELAY ** attempt)
             else:
-                logger.error("Could not connect to MySQL after retries")
                 raise
 
-
 def safe_close_db():
-    """Safely close the DB connection."""
     global _db_conn
     try:
         if _db_conn and _db_conn.is_connected():
@@ -114,310 +71,336 @@ def safe_close_db():
     _db_conn = None
 
 
-# ── 3. Dead-letter logging ────────────────────────────────────
 def log_dead_letter(event, error, attempt_count):
-    """
-    Log events that failed processing after max retries.
-    In production, you'd send this to a dead-letter topic or DB table.
-    """
-    logger.error(
-        f"DEAD LETTER — Event dropped after {attempt_count} attempts\n"
-        f"Event: {json.dumps(event, default=str)[:500]}\n"
-        f"Error: {error}"
-    )
-    # Optionally write to a dead-letter file
+    logger.error(f"DEAD LETTER after {attempt_count} attempts: {error}")
     try:
         with open("kafka/dead_letters.log", "a") as f:
             f.write(f"{datetime.now().isoformat()} | {json.dumps(event, default=str)} | {error}\n")
     except Exception:
-        pass  # Don't fail on dead-letter logging
+        pass
 
-
-# ── 4. Validate Kafka message ────────────────────────────────
 def validate_event(event):
-    """
-    Validate incoming Kafka event. Returns (is_valid, cleaned_event, error_msg).
-    Missing optional fields are filled with defaults.
-    """
     if not isinstance(event, dict):
-        return False, None, "Event is not a dict"
+        return False, None, "Not a dict"
+    if not event.get("user_id"):
+        return False, None, "Missing user_id"
 
-    # Check required fields
-    for field in REQUIRED_FIELDS:
-        if field not in event or not event[field]:
-            return False, None, f"Missing required field: {field}"
+    cleaned = {
+        "user_id":      str(event.get("user_id",      "")).strip()[:200],
+        "event_type":   str(event.get("event_type",   "view")).strip().lower(),
+        "main_category":str(event.get("main_category","unknown")).strip()[:100],
+        "brand":        str(event.get("brand",        "unknown")).strip()[:100],
+        "price_range":  str(event.get("price_range",  "unknown")).strip()[:50],
+        "product_name": str(event.get("product_name", "")).strip()[:255],
+        "search_query": str(event.get("search_query", "")).strip()[:255],
+        "session_id":   str(event.get("session_id",   "")).strip()[:100],
+        "event_time":   str(event.get("event_time",   datetime.now().isoformat())),
+        "source":       str(event.get("source",       "api")).strip()[:100],
+        "age_group":    str(event.get("age_group",    "")).strip()[:20],
+        "gender":       str(event.get("gender",       "")).strip()[:20],
+        "city":         str(event.get("city",         "")).strip()[:100],
+        "state":        str(event.get("state",        "")).strip()[:100],
+        "country":      str(event.get("country",      "India")).strip()[:50],
+        "device_type":  str(event.get("device_type",  "")).strip()[:50],
+        "platform":     str(event.get("platform",     "")).strip()[:50],
+        "language":     str(event.get("language",     "")).strip()[:20],
+    }
 
-    # Fill optional fields with defaults
-    cleaned = {}
-    cleaned["user_id"] = str(event["user_id"]).strip()[:200]
-
-    for field, default in OPTIONAL_FIELDS.items():
-        value = event.get(field, default)
-        if value is None:
-            if field == "event_time":
-                value = datetime.now().isoformat()
-            else:
-                value = default or "unknown"
-        cleaned[field] = str(value).strip()[:200] if isinstance(value, str) else value
-
-    # Validate event_type
-    valid_types = {"view", "cart", "purchase"}
-    if cleaned.get("event_type") not in valid_types:
-        logger.warning(f"    Unknown event_type '{cleaned.get('event_type')}', defaulting to 'view'")
+    valid_types = {"view", "search", "cart", "purchase", "dismiss", "click"}
+    if cleaned["event_type"] not in valid_types:
         cleaned["event_type"] = "view"
 
     return True, cleaned, None
 
 
-# ── 5. Identity Resolution ────────────────────────────────────
-def resolve_identity(cursor, user_id):
+def resolve_identity(cursor, user_id, device_id=None):
     """
-    Find or create a core_id for this user_id.
-
-    This is your Identity Resolution module from the report.
-    - If we've seen this user_id before → return their existing core_id
-    - If new user → create a new UUID core_id and save it
+    Epsilon Layer 1: Link user_id and device_id to one Core ID.
     """
-
-    # Check if this user_id already exists in identities table
     cursor.execute(
-        "SELECT core_id FROM identities WHERE identifier_type = 'user_id' AND identifier_value = %s",
+        "SELECT core_id FROM identities WHERE identifier_type='user_id' AND identifier_value=%s",
         (str(user_id),)
     )
     result = cursor.fetchone()
 
     if result:
-        # User already exists — return their core_id
-        return result[0]
-
+        core_id = result[0]
     else:
-        # New user — create a fresh UUID as core_id
-        new_core_id = str(uuid.uuid4())   # generates something like "a1b2-c3d4-..."
-
-        # Insert into users table (master record)
+        core_id = str(uuid.uuid4())
+        cursor.execute("INSERT INTO users (core_id) VALUES (%s)", (core_id,))
         cursor.execute(
-            "INSERT INTO users (core_id) VALUES (%s)",
-            (new_core_id,)
+            "INSERT INTO identities (core_id, identifier_type, identifier_value) VALUES (%s,%s,%s)",
+            (core_id, "user_id", str(user_id))
         )
 
-        # Insert into identities table (link user_id → core_id)
+    if device_id and device_id.strip():
         cursor.execute(
-            "INSERT INTO identities (core_id, identifier_type, identifier_value) VALUES (%s, %s, %s)",
-            (new_core_id, "user_id", str(user_id))
+            "SELECT id FROM identities WHERE identifier_type='device_id' AND identifier_value=%s",
+            (str(device_id),)
         )
+        if not cursor.fetchone():
+            cursor.execute(
+                "INSERT IGNORE INTO identities (core_id, identifier_type, identifier_value) VALUES (%s,%s,%s)",
+                (core_id, "device_id", str(device_id))
+            )
 
-        return new_core_id
+    return core_id
 
 
-# ── 6. Save Interaction ───────────────────────────────────────
 def save_interaction(cursor, core_id, event):
     """
-    Save one event (view/cart/purchase) to interactions table.
-    Every single action by the user is recorded here.
+    Epsilon Layer 2: Save every behavioral event with full context.
+    Includes search queries, session, device type.
     """
     cursor.execute("""
         INSERT INTO interactions
-            (core_id, event_type, main_category, brand, price_range, event_time, source)
-        VALUES
-            (%s, %s, %s, %s, %s, %s, %s)
+            (core_id, event_type, main_category, brand, price_range,
+             product_name, search_query, session_id, device_type,
+             event_time, source)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
     """, (
         core_id,
         event.get("event_type",    "view"),
         event.get("main_category", "unknown"),
         event.get("brand",         "unknown"),
         event.get("price_range",   "unknown"),
+        event.get("product_name",  "") or None,
+        event.get("search_query",  "") or None,
+        event.get("session_id",    "") or None,
+        event.get("device_type",   "") or None,
         event.get("event_time",    datetime.now().isoformat()),
-        event.get("source",        "kaggle")
+        event.get("source",        "api")
     ))
 
+def update_demographics(cursor, core_id, event):
+    """
+    Epsilon Layer 4: Store basic profile info sent by partner company.
+    Only updates fields that are actually provided (not empty).
+    """
+    age_group   = event.get("age_group",   "")
+    gender      = event.get("gender",      "")
+    city        = event.get("city",        "")
+    state       = event.get("state",       "")
+    country     = event.get("country",     "India")
+    device_type = event.get("device_type", "")
+    platform    = event.get("platform",    "")
+    language    = event.get("language",    "")
 
-# ── 7. Get product lifetime ───────────────────────────────────
-def get_lifetime_days(cursor, category):
-    """
-    Look up how many days this product category lasts.
-    Example: stationery = 5 days, electronics = 1095 days
-    """
+    if not any([age_group, gender, city, state, device_type, platform, language]):
+        return
+
     cursor.execute(
-        "SELECT lifetime_days FROM product_lifetime WHERE main_category = %s",
-        (category,)
+        "SELECT demo_id FROM user_demographics WHERE core_id = %s",
+        (core_id,)
     )
-    result = cursor.fetchone()
+    existing = cursor.fetchone()
 
-    if result:
-        return result[0]
+    if existing:
+        updates = []
+        values  = []
+        if age_group:   updates.append("age_group=%s");   values.append(age_group)
+        if gender:      updates.append("gender=%s");      values.append(gender)
+        if city:        updates.append("city=%s");        values.append(city)
+        if state:       updates.append("state=%s");       values.append(state)
+        if country:     updates.append("country=%s");     values.append(country)
+        if device_type: updates.append("device_type=%s"); values.append(device_type)
+        if platform:    updates.append("platform=%s");    values.append(platform)
+        if language:    updates.append("language=%s");    values.append(language)
+        updates.append("updated_at=NOW()")
+        values.append(core_id)
+
+        cursor.execute(
+            f"UPDATE user_demographics SET {', '.join(updates)} WHERE core_id=%s",
+            values
+        )
     else:
-        return 90   # default 90 days if category not in table
+        cursor.execute("""
+            INSERT INTO user_demographics
+                (core_id, age_group, gender, city, state, country,
+                 device_type, platform, language)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        """, (
+            core_id,
+            age_group   or None,
+            gender      or None,
+            city        or None,
+            state       or None,
+            country     or "India",
+            device_type or None,
+            platform    or None,
+            language    or None,
+        ))
 
 
-# ── 8. Update Interest Profile ────────────────────────────────
 def update_interest_profile(cursor, core_id, event):
     """
-    Update what the user is interested in.
-
-    This builds your 4-parameter profile:
-    - main_category (electronics, stationery...)
-    - brand         (samsung, parker...)
-    - price_range   (50k-70k, 0-500...)
-    - browse_count  (how many times viewed)
-
-    Scoring logic:
-    - view     → interest_score + 0.5
-    - cart     → interest_score + 1.0  (stronger signal)
-    - purchase → interest_score + 2.0  (strongest signal) + set suppress date
+    Epsilon Layers 3 + 5:
+    - Layer 3: Track purchase counts, total spent
+    - Layer 5: Update multi-dimensional interest scores
     """
+    category    = event.get("main_category", "unknown")
+    brand       = event.get("brand",         "unknown")
+    price_range = event.get("price_range",   "unknown")
+    event_type  = event.get("event_type",    "view")
 
-    category   = event.get("main_category", "unknown")
-    brand      = event.get("brand",         "unknown")
-    price_range = event.get("price_range",  "unknown")
-    event_type = event.get("event_type",    "view")
+    weights = SCORE_WEIGHTS.get(event_type, SCORE_WEIGHTS["view"])
 
-    # Score to add based on event type
-    score_map = {
-        "view":     0.5,
-        "cart":     1.0,
-        "purchase": 2.0
+    price_estimate_map = {
+        "0-500": 250, "500-1k": 750, "1k-5k": 3000,
+        "5k-10k": 7500, "10k-30k": 20000, "30k-70k": 50000, "70k+": 80000
     }
-    score_delta = score_map.get(event_type, 0.5)
+    estimated_price = price_estimate_map.get(price_range, 0)
 
-    # Check if profile row already exists for this user+category+brand
     cursor.execute("""
-        SELECT profile_id, interest_score, browse_count, purchase_count
+        SELECT profile_id, interest_score, browse_score, purchase_score,
+               engagement_score, browse_count, cart_count, purchase_count,
+               dismiss_count, total_spent
         FROM interest_profiles
-        WHERE core_id = %s AND main_category = %s AND brand = %s
+        WHERE core_id=%s AND main_category=%s AND brand=%s
     """, (core_id, category, brand))
 
     existing = cursor.fetchone()
 
     if existing:
-        # Profile exists — UPDATE it
-        profile_id     = existing[0]
-        new_score      = existing[1] + score_delta
-        new_browse     = existing[2] + (1 if event_type == "view" else 0)
-        new_purchase   = existing[3] + (1 if event_type == "purchase" else 0)
+        (profile_id, interest_score, browse_score, purchase_score,
+         engagement_score, browse_count, cart_count, purchase_count,
+         dismiss_count, total_spent) = existing
 
-        # If purchase → calculate suppress_until date
+        # Update scores
+        new_interest    = max(0, interest_score    + weights["interest"])
+        new_browse      = max(0, browse_score      + weights["browse"])
+        new_purchase_s  = max(0, purchase_score    + weights["purchase"])
+        new_engagement  = max(0, engagement_score  + weights["engagement"])
+
+        # Update counts
+        new_browse_c    = browse_count    + (1 if event_type == "view"     else 0)
+        new_cart_c      = cart_count      + (1 if event_type == "cart"     else 0)
+        new_purchase_c  = purchase_count  + (1 if event_type == "purchase" else 0)
+        new_dismiss_c   = dismiss_count   + (1 if event_type == "dismiss"  else 0)
+        new_total_spent = (total_spent or 0) + (estimated_price if event_type == "purchase" else 0)
+
+        # Calculate suppress_until
         suppress_until = None
         if event_type == "purchase":
             lifetime = get_lifetime_days(cursor, category)
             suppress_until = datetime.now() + timedelta(days=lifetime)
-            logger.info(f"Suppressing '{category}' for {lifetime} days (until {suppress_until.date()})")
+            logger.info(f"Suppressing '{category}' for {lifetime} days")
+        elif event_type == "dismiss":
+            suppress_until = datetime.now() + timedelta(days=7)
+            logger.info(f"Dismissed — suppressing '{category}' for 7 days")
 
-        if suppress_until:
-            cursor.execute("""
-                UPDATE interest_profiles
-                SET interest_score  = %s,
-                    browse_count    = %s,
-                    purchase_count  = %s,
-                    last_purchased  = NOW(),
-                    suppress_until  = %s,
-                    updated_at      = NOW()
-                WHERE profile_id = %s
-            """, (new_score, new_browse, new_purchase, suppress_until, profile_id))
-        else:
-            cursor.execute("""
-                UPDATE interest_profiles
-                SET interest_score = %s,
-                    browse_count   = %s,
-                    purchase_count = %s,
-                    updated_at     = NOW()
-                WHERE profile_id = %s
-            """, (new_score, new_browse, new_purchase, profile_id))
+        cursor.execute("""
+            UPDATE interest_profiles
+            SET interest_score   = %s,
+                browse_score     = %s,
+                purchase_score   = %s,
+                engagement_score = %s,
+                browse_count     = %s,
+                cart_count       = %s,
+                purchase_count   = %s,
+                dismiss_count    = %s,
+                total_spent      = %s,
+                last_purchased   = %s,
+                suppress_until   = %s,
+                updated_at       = NOW()
+            WHERE profile_id = %s
+        """, (
+            new_interest, new_browse, new_purchase_s, new_engagement,
+            new_browse_c, new_cart_c, new_purchase_c, new_dismiss_c,
+            new_total_spent,
+            datetime.now() if event_type == "purchase" else None,
+            suppress_until,
+            profile_id
+        ))
 
     else:
-        # New profile row — INSERT it
+        # New profile row
         suppress_until = None
         if event_type == "purchase":
             lifetime = get_lifetime_days(cursor, category)
             suppress_until = datetime.now() + timedelta(days=lifetime)
+        elif event_type == "dismiss":
+            suppress_until = datetime.now() + timedelta(days=7)
 
         cursor.execute("""
             INSERT INTO interest_profiles
                 (core_id, main_category, brand, price_range,
-                 interest_score, browse_count, purchase_count,
-                 last_purchased, suppress_until)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 interest_score, browse_score, purchase_score, engagement_score,
+                 browse_count, cart_count, purchase_count, dismiss_count,
+                 total_spent, last_purchased, suppress_until)
+            VALUES (%s,%s,%s,%s, %s,%s,%s,%s, %s,%s,%s,%s, %s,%s,%s)
         """, (
-            core_id,
-            category,
-            brand,
-            price_range,
-            score_delta,                                          # starting score
-            1 if event_type == "view" else 0,                    # browse count
-            1 if event_type == "purchase" else 0,                # purchase count
-            datetime.now() if event_type == "purchase" else None, # last purchased
-            suppress_until                                        # suppress date
+            core_id, category, brand, price_range,
+            weights["interest"], weights["browse"],
+            weights["purchase"], weights["engagement"],
+            1 if event_type == "view"     else 0,
+            1 if event_type == "cart"     else 0,
+            1 if event_type == "purchase" else 0,
+            1 if event_type == "dismiss"  else 0,
+            estimated_price if event_type == "purchase" else 0,
+            datetime.now() if event_type == "purchase" else None,
+            suppress_until
         ))
 
 
-# ── 9. Process one event (with retry) ─────────────────────────
-def process_event(event):
-    """
-    Main function that handles one incoming Kafka event.
-    Called once per message received from Kafka.
-    Retries up to MAX_EVENT_RETRIES times before dead-lettering.
-    """
+def get_lifetime_days(cursor, category):
+    cursor.execute(
+        "SELECT lifetime_days FROM product_lifetime WHERE main_category=%s",
+        (category,)
+    )
+    result = cursor.fetchone()
+    return result[0] if result else 90
 
-    # Validate message structure
+
+def process_event(event):
     is_valid, cleaned_event, error_msg = validate_event(event)
     if not is_valid:
-        logger.warning(f"Malformed message skipped: {error_msg}")
         log_dead_letter(event, error_msg, 0)
         return
 
     event = cleaned_event
 
     for attempt in range(1, MAX_EVENT_RETRIES + 1):
-        conn = None
-        cursor = None
+        conn = cursor = None
         try:
             conn   = get_db_connection()
             cursor = conn.cursor()
 
-            user_id = event.get("user_id", "unknown")
+            user_id   = event.get("user_id",    "unknown")
+            device_id = event.get("device_id",  "")
 
-            # Step A: Resolve identity (find or create core_id)
-            core_id = resolve_identity(cursor, user_id)
+            core_id = resolve_identity(cursor, user_id, device_id)
 
-            # Step B: Save the raw interaction
             save_interaction(cursor, core_id, event)
 
-            # Step C: Update the interest profile
+            update_demographics(cursor, core_id, event)
+
             update_interest_profile(cursor, core_id, event)
 
-            # Commit all changes to MySQL
             conn.commit()
 
-            logger.info(f"{event.get('event_type')} | user:{user_id} | "
-                  f"{event.get('main_category')} | {event.get('brand')} | "
-                  f"{event.get('price_range')}")
-            return  # Success — exit retry loop
+            logger.info(
+                f"{event.get('event_type'):8} | {event.get('main_category'):12} | "
+                f"{event.get('brand'):10} | user:{user_id}"
+            )
+            return
 
         except mysql.connector.Error as e:
-            # MySQL-specific error — might be a dropped connection
-            logger.warning(f"MySQL error (attempt {attempt}/{MAX_EVENT_RETRIES}): {e}")
+            logger.warning(f"MySQL error (attempt {attempt}): {e}")
             if conn:
-                try:
-                    conn.rollback()
-                except Exception:
-                    pass
-            # Force reconnect on next attempt
+                try: conn.rollback()
+                except: pass
             safe_close_db()
-
             if attempt < MAX_EVENT_RETRIES:
-                delay = DB_RETRY_DELAY ** attempt
-                logger.info(f"Retrying in {delay}s...")
-                time.sleep(delay)
+                time.sleep(DB_RETRY_DELAY ** attempt)
             else:
                 log_dead_letter(event, str(e), attempt)
 
         except Exception as e:
-            logger.error(f"Error processing event (attempt {attempt}/{MAX_EVENT_RETRIES}): {e}")
+            logger.error(f"Error (attempt {attempt}): {e}")
             if conn:
-                try:
-                    conn.rollback()
-                except Exception:
-                    pass
-
+                try: conn.rollback()
+                except: pass
             if attempt < MAX_EVENT_RETRIES:
                 time.sleep(DB_RETRY_DELAY)
             else:
@@ -425,65 +408,46 @@ def process_event(event):
 
         finally:
             if cursor:
-                try:
-                    cursor.close()
-                except Exception:
-                    pass
+                try: cursor.close()
+                except: pass
 
 
-# ── 10. Start listening to Kafka ──────────────────────────────
 def start_consumer():
-    """
-    Connect to Kafka and listen for incoming messages forever.
-    This runs in a loop until you press Ctrl+C.
-    """
-    logger.info("Connecting to Kafka consumer...")
-
+    logger.info("Connecting to Kafka...")
     try:
         consumer = KafkaConsumer(
             TOPIC_NAME,
-            bootstrap_servers = KAFKA_SERVER,
-            group_id          = GROUP_ID,
-            auto_offset_reset = "earliest",    # start from beginning of topic
+            bootstrap_servers  = KAFKA_SERVER,
+            group_id           = GROUP_ID,
+            auto_offset_reset  = "earliest",
             value_deserializer = lambda v: json.loads(v.decode("utf-8"))
-            # value_deserializer = converts incoming bytes → JSON → Python dict
         )
-        logger.info(f"Listening to topic: '{TOPIC_NAME}'")
-        logger.info("Waiting for events... (Press Ctrl+C to stop)\n")
-
+        logger.info(f"Listening to: '{TOPIC_NAME}'")
+        logger.info("Waiting for events... (Ctrl+C to stop)\n")
     except Exception as e:
         logger.error(f"Could not connect to Kafka: {e}")
         exit(1)
 
-    # Loop forever — process every message that arrives
-    processed = 0
-    errors = 0
+    processed = errors = 0
     for message in consumer:
         try:
-            event = message.value       # the actual event dict
-            process_event(event)
+            process_event(message.value)
             processed += 1
-        except json.JSONDecodeError as e:
-            logger.warning(f"    Could not decode Kafka message: {e}")
-            errors += 1
         except Exception as e:
-            logger.error(f"Unexpected error on message: {e}")
+            logger.error(f"Unexpected error: {e}")
             errors += 1
-
-        # Print summary every 50 events
         if processed % 50 == 0 and processed > 0:
-            logger.info(f"\n── {processed} events processed ({errors} errors) ──\n")
+            logger.info(f"── {processed} processed ({errors} errors) ──")
 
 
-# ── 11. Run ───────────────────────────────────────────────────
 if __name__ == "__main__":
     logger.info("=" * 50)
-    logger.info("  CPRP - Kafka Consumer + Profile Builder")
+    logger.info("  CPRP — Consumer")
     logger.info("=" * 50)
     try:
         start_consumer()
     except KeyboardInterrupt:
-        logger.info("\n Consumer stopped by user")
+        logger.info("Stopped by user")
     finally:
         safe_close_db()
         logger.info("Goodbye!")

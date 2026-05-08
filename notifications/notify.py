@@ -1,29 +1,3 @@
-# ============================================================
-# STEP 8 - Suppression Logic + Email Notification
-# File: notifications/notify.py
-#
-# What this does:
-# - Runs daily (like a cron job)
-# - Checks MySQL for users whose product lifetime has expired
-# - Skips users who are still in suppression period
-# - Finds similar products using the ML model
-# - Sends email notification via SendGrid
-#
-# Two triggers:
-#   1. Timeline trigger  → pen bought 5 days ago → send notification
-#   2. Event trigger     → user viewed same product 3+ times → send now
-#
-# Edge cases handled:
-#   - Empty/invalid email addresses
-#   - Empty recommendation lists (trending fallback)
-#   - SendGrid rate limits (retry with exponential backoff)
-#   - DB connection failures (auto-reconnect)
-#   - Duplicate notification prevention (24h window)
-#   - Batch size limiting (max 50 emails per run)
-#
-# Command: python notifications/notify.py
-# ============================================================
-
 import joblib
 import pandas as pd
 import mysql.connector
@@ -37,7 +11,6 @@ import os
 from dotenv import load_dotenv
 load_dotenv()
 
-# ── Logging setup ─────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -45,16 +18,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger("notify")
 
-# ── 1. Configuration ──────────────────────────────────────────
 
-# SendGrid API key
 SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY")
 
-# Email settings
 FROM_EMAIL = os.getenv("FROM_EMAIL")
 FROM_NAME = os.getenv("FROM_NAME")
 
-# MySQL config
 DB_CONFIG = {
     "host": os.getenv("DB_HOST"),
     "port": os.getenv("DB_PORT"),
@@ -63,20 +32,16 @@ DB_CONFIG = {
     "database": os.getenv("DB_NAME")
 }
 
-# Trigger threshold — how many views before we send immediate notification
 VIEW_TRIGGER_COUNT = 3
 
-# Batch limit — max emails per run to avoid SendGrid throttling
 MAX_EMAILS_PER_RUN = 50
 
-# Retry config for SendGrid
 MAX_RETRIES = 3
-RETRY_BASE_DELAY = 2  # seconds
+RETRY_BASE_DELAY = 2
 
 # Email validation regex
 EMAIL_REGEX = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
 
-# Category emoji mapping for email templates
 CATEGORY_ICONS = {
     "electronics":       "📱",
     "computers":         "💻",
@@ -100,7 +65,6 @@ CATEGORY_ICONS = {
 }
 
 
-# ── 2. Load ML model ──────────────────────────────────────────
 logger.info("Loading ML model...")
 try:
     tfidf             = joblib.load("ml/tfidf.pkl")
@@ -112,7 +76,6 @@ except FileNotFoundError:
     exit(1)
 
 
-# ── 3. Database connection with reconnect ─────────────────────
 _db_conn = None
 
 def get_db():
@@ -149,7 +112,6 @@ def safe_close_db():
     _db_conn = None
 
 
-# ── 4. Email validation ──────────────────────────────────────
 def is_valid_email(email):
     """Validate email format. Returns False for None, empty, or malformed."""
     if not email or not isinstance(email, str):
@@ -163,14 +125,12 @@ def get_user_name(email):
         if not email or "@" not in email:
             return "there"
         name = email.split("@")[0]
-        # Clean up: replace dots/underscores with spaces, title case
         name = name.replace(".", " ").replace("_", " ").replace("-", " ")
         return name.title() if name else "there"
     except Exception:
         return "there"
 
 
-# ── 5. Find similar products ──────────────────────────────────
 def find_similar(category, brand, top_n=3):
     """
     Given category + brand, find top N similar products.
@@ -211,7 +171,6 @@ def get_trending_products(top_n=3):
     if products_df is None or len(products_df) == 0:
         return []
 
-    # Get most common categories
     top_cats = products_df["main_category"].value_counts().head(top_n)
     trending = []
     for cat in top_cats.index:
@@ -224,8 +183,6 @@ def get_trending_products(top_n=3):
     return trending
 
 
-# ── 6. Premium Email Templates ────────────────────────────────
-
 def build_email_html(user_name, category, brand, recommendations, trigger_type):
     """
     Build a premium, responsive HTML email template.
@@ -233,7 +190,6 @@ def build_email_html(user_name, category, brand, recommendations, trigger_type):
     """
     icon = CATEGORY_ICONS.get(category.lower(), "🛍️")
 
-    # Build recommendation cards
     rec_cards = ""
     for i, r in enumerate(recommendations, 1):
         r_icon = CATEGORY_ICONS.get(r["category"].lower(), "📦")
@@ -262,7 +218,6 @@ def build_email_html(user_name, category, brand, recommendations, trigger_type):
         </tr>
         """
 
-    # Intro text based on trigger type
     if trigger_type == "timeline":
         subject = f"Time to upgrade your {category}? Here are some picks for you!"
         intro_text = f"""
@@ -397,7 +352,6 @@ def build_email_html(user_name, category, brand, recommendations, trigger_type):
     return subject, html_content
 
 
-# ── 7. Send email via SendGrid with retry ─────────────────────
 def send_email(to_email, user_name, category, brand, recommendations, trigger_type):
     """
     Send a product recommendation email to the user.
@@ -406,12 +360,10 @@ def send_email(to_email, user_name, category, brand, recommendations, trigger_ty
     trigger_type = "timeline" or "interest"
     """
 
-    # Validate email before attempting to send
     if not is_valid_email(to_email):
         logger.warning(f"Invalid email skipped: {to_email!r}")
         return False
 
-    # Handle empty recommendations — use trending fallback
     if not recommendations:
         recommendations = get_trending_products()
         if not recommendations:
@@ -419,12 +371,10 @@ def send_email(to_email, user_name, category, brand, recommendations, trigger_ty
             return False
         logger.info(f"Using trending fallback for {to_email}")
 
-    # Build email content
     subject, html_content = build_email_html(
         user_name, category, brand, recommendations, trigger_type
     )
 
-    # Create SendGrid message
     message = Mail(
         from_email    = (FROM_EMAIL, FROM_NAME),
         to_emails     = to_email,
@@ -432,7 +382,6 @@ def send_email(to_email, user_name, category, brand, recommendations, trigger_ty
         html_content  = html_content
     )
 
-    # Retry loop with exponential backoff
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             sg       = SendGridAPIClient(SENDGRID_API_KEY)
@@ -443,7 +392,6 @@ def send_email(to_email, user_name, category, brand, recommendations, trigger_ty
         except Exception as e:
             error_str = str(e)
 
-            # Check for rate limit (429) or server error (5xx)
             is_retryable = "429" in error_str or "500" in error_str or "502" in error_str or "503" in error_str
 
             if is_retryable and attempt < MAX_RETRIES:
@@ -457,7 +405,6 @@ def send_email(to_email, user_name, category, brand, recommendations, trigger_ty
     return False
 
 
-# ── 8. Log notification to MySQL ──────────────────────────────
 def log_notification(cursor, core_id, to_email, category, brand, recommendations, status):
     """Save a record of every notification sent."""
     rec_str = ", ".join([f"{r['brand']} {r['category']}" for r in recommendations])
@@ -474,7 +421,6 @@ def log_notification(cursor, core_id, to_email, category, brand, recommendations
     ))
 
 
-# ── 9. Duplicate check ───────────────────────────────────────
 def was_notified_recently(cursor, core_id, category, hours=24):
     """
     Check if this user+category was notified within the last N hours.
@@ -491,7 +437,6 @@ def was_notified_recently(cursor, core_id, category, hours=24):
     return count > 0
 
 
-# ── 10. Timeline trigger ──────────────────────────────────────
 def check_timeline_triggers():
     """
     Find users whose product lifetime has expired.
@@ -507,7 +452,6 @@ def check_timeline_triggers():
     conn   = get_db()
     cursor = conn.cursor(dictionary=True)
 
-    # Find profiles where suppress_until = today (lifetime just expired)
     cursor.execute("""
         SELECT
             ip.core_id,
@@ -532,18 +476,15 @@ def check_timeline_triggers():
     skipped_duplicate = 0
 
     for p in profiles:
-        # Enforce batch limit
         if notified >= MAX_EMAILS_PER_RUN:
             logger.info(f"Batch limit reached ({MAX_EMAILS_PER_RUN}). Remaining deferred to next run.")
             break
 
-        # Validate email
         if not is_valid_email(p.get("email")):
             logger.warning(f"Skipping invalid email for user {p['core_id'][:8]}...")
             skipped_invalid += 1
             continue
 
-        # Check duplicate prevention
         if was_notified_recently(cursor, p["core_id"], p["main_category"]):
             logger.info(f"Skipping {p['core_id'][:8]}... — already notified within 24h")
             skipped_duplicate += 1
@@ -551,10 +492,8 @@ def check_timeline_triggers():
 
         logger.info(f"\n  User: {p['core_id'][:8]}... | {p['main_category']} | {p['brand']}")
 
-        # Find similar products to recommend
         recs = find_similar(p["main_category"], p["brand"])
 
-        # If no personalized recs, use trending fallback
         if not recs:
             recs = get_trending_products()
             if recs:
@@ -563,7 +502,6 @@ def check_timeline_triggers():
                 logger.warning(f"No products available at all — skipping")
                 continue
 
-        # Send email
         user_name = get_user_name(p["email"])
         success = send_email(
             to_email     = p["email"],
@@ -574,11 +512,9 @@ def check_timeline_triggers():
             trigger_type = "timeline"
         )
 
-        # Log notification
         log_notification(cursor, p["core_id"], p["email"],
                         p["main_category"], p["brand"], recs, success)
 
-        # Reset suppress_until so we don't send again immediately
         cursor.execute("""
             UPDATE interest_profiles
             SET suppress_until = NULL
@@ -593,7 +529,6 @@ def check_timeline_triggers():
     logger.info(f"\nTimeline — Sent: {notified} | Invalid: {skipped_invalid} | Duplicate: {skipped_duplicate}")
 
 
-# ── 11. Event trigger ─────────────────────────────────────────
 def check_event_triggers():
     """
     Find users who viewed the same product 3+ times but haven't bought.
@@ -639,18 +574,15 @@ def check_event_triggers():
     skipped_duplicate = 0
 
     for p in profiles:
-        # Enforce batch limit
         if notified >= MAX_EMAILS_PER_RUN:
             logger.info(f"Batch limit reached ({MAX_EMAILS_PER_RUN}). Remaining deferred.")
             break
 
-        # Validate email
         if not is_valid_email(p.get("email")):
             logger.warning(f"Skipping invalid email for user {p['core_id'][:8]}...")
             skipped_invalid += 1
             continue
 
-        # Duplicate check
         if was_notified_recently(cursor, p["core_id"], p["main_category"]):
             logger.info(f"Skipping {p['core_id'][:8]}... — already notified within 24h")
             skipped_duplicate += 1
@@ -660,7 +592,6 @@ def check_event_triggers():
 
         recs = find_similar(p["main_category"], p["brand"])
 
-        # Fallback to trending
         if not recs:
             recs = get_trending_products()
             if recs:
@@ -689,7 +620,6 @@ def check_event_triggers():
     logger.info(f"\nInterest — Sent: {notified} | Invalid: {skipped_invalid} | Duplicate: {skipped_duplicate}")
 
 
-# ── 12. Run both triggers ─────────────────────────────────────
 if __name__ == "__main__":
     logger.info("=" * 50)
     logger.info("  CPRP - Notification Engine")

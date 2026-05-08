@@ -1,46 +1,26 @@
 version: '3.8'
 
-# ============================================================
-# docker-compose.yml
-#
-# Starts ALL services with one command:
-#   docker-compose up -d
-#
-# Services started:
-#   1. MySQL     → localhost:3306  (your database)
-#   2. Zookeeper → localhost:2181  (needed by Kafka)
-#   3. Kafka     → localhost:9092  (event streaming)
-#
-# Stop everything:
-#   docker-compose down
-#
-# View logs:
-#   docker-compose logs kafka
-#   docker-compose logs mysql
-# ============================================================
-
 services:
 
-  # ── MySQL Database ──────────────────────────────────────────
+  # ── MySQL Database ──────────────
   mysql:
     image: mysql:8.0
     container_name: cprp_mysql
     ports:
       - "3306:3306"
     environment:
-      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}    # ← CHANGE THIS (same as in your Python files)
-      MYSQL_DATABASE: ${DB_NAME}                  # auto-creates the cprp database
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
+      MYSQL_DATABASE: ${DB_NAME}
     volumes:
-      - mysql_data:/var/lib/mysql           # saves data even after container restarts
-      - ./db/schema.sql:/docker-entrypoint-initdb.d/schema.sql  # runs schema on first start
+      - mysql_data:/var/lib/mysql
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/schema.sql
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  # ── Zookeeper (required by Kafka) ───────────────────────────
-  zookeeper:
+  # ── Zookeeper ───────
     image: zookeeper:3.7
     container_name: cprp_zookeeper
     ports:
@@ -48,7 +28,7 @@ services:
     environment:
       ZOO_MY_ID: 1
 
-  # ── Kafka ───────────────────────────────────────────────────
+  # ── Kafka ──────
   kafka:
     image: confluentinc/cp-kafka:7.4.0
     container_name: cprp_kafka
@@ -63,6 +43,6 @@ services:
     depends_on:
       - zookeeper
 
-# ── Persistent storage ────────────────────────────────────────
+# ── Persistent storage ───────
 volumes:
   mysql_data:

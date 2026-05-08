@@ -1,18 +1,3 @@
-# ============================================================
-# STEP 9 - End-to-End Demo Script
-# File: notifications/demo.py
-#
-# What this does:
-# - Simulates the complete project flow for your viva demo
-# - No need for Kafka running — calls Flask API directly
-# - Shows: browse → profile created → buy → suppress → notify
-#
-# This is what you run during your viva presentation!
-# Command: python notifications/demo.py
-#
-# Make sure Flask API (api/app.py) is running first.
-# ============================================================
-
 import requests
 import json
 import time
@@ -50,15 +35,11 @@ def get_token():
         "username": "admin", "password": "admin123"
     })
     TOKEN = r.json()["token"]
-    print(f"✅ Logged in — token received")
+    print(f"Logged in — token received")
 
 def headers():
     return {"Authorization": f"Bearer {TOKEN}"}
 
-
-# ── DEMO SCENARIO: Vignesh and his Samsung phone ──────────────
-
-sep("STEP 1 — Vignesh browses Samsung S24 (3 times)")
 get_token()
 
 for i in range(3):
@@ -73,7 +54,6 @@ for i in range(3):
     print(f"  View {i+1}: {r.json().get('message')}")
     time.sleep(0.5)
 
-sep("STEP 2 — Check profile after browsing")
 r = requests.get(f"{BASE_URL}/api/profile/vignesh_demo", headers=headers())
 data = r.json()
 print(f"  Core ID:     {data.get('core_id', '')[:16]}...")
@@ -84,7 +64,6 @@ if data.get("interest_profiles"):
     print(f"  Browse count: {p['browse_count']}")
     print(f"  Score:        {p['interest_score']}")
 
-sep("STEP 3 — Get recommendations (before purchase)")
 r = requests.get(f"{BASE_URL}/api/recommend/vignesh_demo", headers=headers())
 data = r.json()
 print(f"  Suppressed: {data.get('suppressed')}")
@@ -93,7 +72,7 @@ print(f"  Recommendations ({data.get('total', 0)}):")
 for rec in data.get("recommendations", []):
     print(f"    → {rec['brand']} | {rec['main_category']} | {rec['price_range']}")
 
-sep("STEP 4 — Vignesh BUYS Samsung S24")
+
 r = requests.post(f"{BASE_URL}/api/event", headers=headers(), json={
     "user_id":      "vignesh_demo",
     "event_type":   "purchase",
@@ -104,12 +83,11 @@ r = requests.post(f"{BASE_URL}/api/event", headers=headers(), json={
 })
 print(f"  {r.json().get('message')}")
 
-sep("STEP 5 — Check recommendations (after purchase = suppressed)")
 r = requests.get(f"{BASE_URL}/api/recommend/vignesh_demo", headers=headers())
 data = r.json()
-print(f"  Suppressed: {data.get('suppressed')}")
-print(f"  Message: {data.get('message')}")
-print("  ✅ No recommendations — correctly suppressed for 1095 days (3 years)")
+print(f"Suppressed: {data.get('suppressed')}")
+print(f"Message: {data.get('message')}")
+print("No recommendations — correctly suppressed for 1095 days (3 years)")
 
 sep("STEP 6 — Simulate 3 years passing (mock in DB)")
 print("  Manually updating suppress_until to yesterday to simulate time passing...")
@@ -117,7 +95,6 @@ try:
     conn   = mysql.connector.connect(**DB_CONFIG)
     cursor = conn.cursor()
 
-    # Set suppress_until to yesterday — simulates 3 years have passed
     yesterday = datetime.now() - timedelta(days=1)
     cursor.execute("""
         UPDATE interest_profiles
@@ -132,9 +109,9 @@ try:
     conn.commit()
     cursor.close()
     conn.close()
-    print(f"  ✅ suppress_until set to: {yesterday.date()} (simulating 3 years passed)")
+    print(f"suppress_until set to: {yesterday.date()} (simulating 3 years passed)")
 except Exception as e:
-    print(f"  ❌ DB error: {e}")
+    print(f"DB error: {e}")
 
 sep("STEP 7 — Check recommendations again (suppression lifted)")
 r = requests.get(f"{BASE_URL}/api/recommend/vignesh_demo", headers=headers())
