@@ -20,7 +20,8 @@ services:
       timeout: 5s
       retries: 5
 
-  # ── Zookeeper ───────
+  # ── Zookeeper ──────────────────
+  zookeeper:
     image: zookeeper:3.7
     container_name: cprp_zookeeper
     ports:
@@ -28,7 +29,7 @@ services:
     environment:
       ZOO_MY_ID: 1
 
-  # ── Kafka ──────
+  # ── Kafka ──────────────────────
   kafka:
     image: confluentinc/cp-kafka:7.4.0
     container_name: cprp_kafka
@@ -40,9 +41,14 @@ services:
       KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_RETENTION_MS: 604800000       # 7-day retention
+      KAFKA_LOG_RETENTION_BYTES: 1073741824   # 1GB max per partition
+    volumes:
+      - kafka_data:/var/lib/kafka/data
     depends_on:
       - zookeeper
 
-# ── Persistent storage ───────
+# ── Persistent storage ───────────
 volumes:
   mysql_data:
+  kafka_data:

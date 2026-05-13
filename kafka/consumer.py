@@ -245,11 +245,14 @@ def update_interest_profile(cursor, core_id, event):
 
     weights = SCORE_WEIGHTS.get(event_type, SCORE_WEIGHTS["view"])
 
+    # FMCG / Personal care price ranges (INR)
     price_estimate_map = {
+        "0-50": 25, "50-100": 75, "100-250": 175,
+        "250-500": 375, "500-1000": 750, "1000-2000": 1500, "2000+": 3000,
+        # Legacy ranges (backward compatibility)
         "0-500": 250, "500-1k": 750, "1k-5k": 3000,
-        "5k-10k": 7500, "10k-30k": 20000, "30k-70k": 50000, "70k+": 80000
     }
-    estimated_price = price_estimate_map.get(price_range, 0)
+    estimated_price = price_estimate_map.get(price_range, 100)
 
     cursor.execute("""
         SELECT profile_id, interest_score, browse_score, purchase_score,

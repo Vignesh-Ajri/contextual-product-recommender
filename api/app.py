@@ -249,11 +249,14 @@ def receive_event():
     }
     weights = SCORE_WEIGHTS.get(event_type, SCORE_WEIGHTS["view"])
  
+    # FMCG / Personal care price ranges (INR)
     price_estimate_map = {
-        "0-500":250,"500-1k":750,"1k-5k":3000,
-        "5k-10k":7500,"10k-30k":20000,"30k-70k":50000,"70k+":80000
+        "0-50": 25, "50-100": 75, "100-250": 175,
+        "250-500": 375, "500-1000": 750, "1000-2000": 1500, "2000+": 3000,
+        # Legacy ranges (backward compatibility)
+        "0-500": 250, "500-1k": 750, "1k-5k": 3000,
     }
-    estimated_price = price_estimate_map.get(price_range, 0)
+    estimated_price = price_estimate_map.get(price_range, 100)
  
     conn = cursor = None
     try:
@@ -1107,6 +1110,152 @@ def dashboard_js():
     """Serves the dashboard JS file."""
     return send_from_directory(_PROJECT_ROOT, "dashboard.js")
 
+@app.route("/api/similar-users/<user_id>", methods=["GET"])
+@jwt_required()
+def get_similar_users(user_id):
+    """
+    Lightweight similar-user detection.
+    Finds users who share the most category+brand interests
+    with the given user, then returns products those similar
+    users interacted with but this user hasn't.
+    """
+    try:
+        top_n = int(request.args.get("top_n", 5))
+    except ValueError:
+        top_n = 5
+
+    try:
+        conn   = get_db()
+        cursor = conn.cursor(dictionary=True)
+
+        cursor2 = conn.cursor()
+        core_id = resolve_identity(cursor2, user_id)
+        conn.commit()
+        cursor2.close()
+
+        # Find users with overlapping interests (active in last 30 days)
+        cursor.execute("""
+            SELECT b.core_id, COUNT(*) as shared_interests,
+                   GROUP_CONCAT(DISTINCT b.main_category) as shared_categories
+            FROM interest_profiles a
+            JOIN interest_profiles b
+              ON a.main_category = b.main_category
+              AND a.core_id != b.core_id
+            WHERE a.core_id = %s
+              AND b.interest_score > 1.0
+              AND b.updated_at > DATE_SUB(NOW(), INTERVAL 30 DAY)
+            GROUP BY b.core_id
+            ORDER BY shared_interests DESC
+            LIMIT %s
+        """, (core_id, top_n))
+
+        similar_users = cursor.fetchall()
+
+        # Get product recommendations from similar users
+        cross_recs = []
+        if similar_users:
+            similar_ids = [u["core_id"] for u in similar_users]
+            placeholders = ",".join(["%s"] * len(similar_ids))
+
+            cursor.execute(f"""
+                SELECT DISTINCT ip.main_category, ip.brand, ip.price_range,
+                       ip.interest_score
+                FROM interest_profiles ip
+                WHERE ip.core_id IN ({placeholders})
+                  AND ip.interest_score > 2.0
+                  AND CONCAT(ip.main_category, '_', ip.brand) NOT IN (
+                      SELECT CONCAT(main_category, '_', brand)
+                      FROM interest_profiles WHERE core_id = %s
+                  )
+                ORDER BY ip.interest_score DESC
+                LIMIT 10
+            """, (*similar_ids, core_id))
+
+            cross_recs = cursor.fetchall()
+
+        cursor.close()
+        conn.close()
+
+        return jsonify({
+            "user_id":        user_id,
+            "core_id":        core_id,
+            "similar_users":  len(similar_users),
+            "similar_details": [
+                {
+                    "core_id":           u["core_id"][:8] + "...",
+                    "shared_interests":  u["shared_interests"],
+                    "shared_categories": u["shared_categories"],
+                }
+                for u in similar_users
+            ],
+            "cross_recommendations": cross_recs,
+            "total_cross_recs":      len(cross_recs),
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/user/delete/<user_id>", methods=["DELETE"])
+@jwt_required()
+def delete_user_data(user_id):
+    """
+    GDPR-style user data deletion.
+    Permanently removes ALL data associated with a user:
+    interactions, interest profiles, demographics, notifications, identities.
+    The users row itself is kept but anonymized.
+    """
+    try:
+        conn   = get_db()
+        cursor = conn.cursor()
+
+        cursor2 = conn.cursor()
+        core_id = resolve_identity(cursor2, user_id)
+        conn.commit()
+        cursor2.close()
+
+        # Delete in order of foreign key dependencies
+        cursor.execute("DELETE FROM notifications WHERE core_id = %s", (core_id,))
+        notif_count = cursor.rowcount
+
+        cursor.execute("DELETE FROM interactions WHERE core_id = %s", (core_id,))
+        interaction_count = cursor.rowcount
+
+        cursor.execute("DELETE FROM interest_profiles WHERE core_id = %s", (core_id,))
+        profile_count = cursor.rowcount
+
+        cursor.execute("DELETE FROM user_demographics WHERE core_id = %s", (core_id,))
+
+        cursor.execute("DELETE FROM identities WHERE core_id = %s", (core_id,))
+
+        # Anonymize the user record (keep row for referential integrity)
+        cursor.execute(
+            "UPDATE users SET email = NULL, phone = NULL, updated_at = NOW() WHERE core_id = %s",
+            (core_id,)
+        )
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        return jsonify({
+            "success": True,
+            "user_id": user_id,
+            "core_id": core_id,
+            "deleted": {
+                "interactions":  interaction_count,
+                "profiles":      profile_count,
+                "notifications": notif_count,
+                "demographics":  True,
+                "identities":    True,
+            },
+            "message": "All user data permanently deleted"
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/health", methods=["GET"])
 def health():
     return jsonify({
@@ -1122,11 +1271,17 @@ if __name__ == "__main__":
     print("  Running on http://localhost:5000")
     print("=" * 50)
     print("\nEndpoints:")
-    print("  POST /api/login")
-    print("  POST /api/event")
-    print("  GET  /api/recommend/<user_id>")
-    print("  GET  /api/profile/<user_id>")
-    print("  GET  /api/health")
+    print("  POST   /api/login")
+    print("  POST   /api/event")
+    print("  GET    /api/recommend/<user_id>")
+    print("  GET    /api/profile/<user_id>")
+    print("  GET    /api/profile360/<user_id>")
+    print("  GET    /api/similar-users/<user_id>")
+    print("  POST   /api/feedback")
+    print("  DELETE /api/user/delete/<user_id>")
+    print("  GET    /api/health")
+    print("  GET    /api/stats")
+    print("  GET    /docs  (Swagger UI)")
     print("\nPress Ctrl+C to stop\n")
 
     app.run(

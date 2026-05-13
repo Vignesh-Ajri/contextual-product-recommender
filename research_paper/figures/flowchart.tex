@@ -1,0 +1,37 @@
+\begin{tikzpicture}[
+    node distance=1.5cm and 2cm,
+    process/.style={rectangle, draw, align=center, fill=blue!10, minimum width=3cm, minimum height=1cm, font=\small},
+    decision/.style={diamond, draw, align=center, fill=yellow!10, aspect=2, font=\small},
+    arrow/.style={-latex, thick}
+]
+
+% Nodes
+\node[process] (start) {Receive Recommendation Request};
+\node[process, below=1cm of start] (fetch_profile) {Fetch User Unified Profile};
+\node[decision, below=1cm of fetch_profile] (is_suppressed) {Is Category Suppressed?};
+\node[process, right=2cm of is_suppressed] (skip) {Filter Category};
+\node[process, below=1.5cm of is_suppressed] (calc_score) {Calculate Hybrid Score (Content + Collab)};
+\node[decision, below=1cm of calc_score] (above_threshold) {Score $>$ Threshold?};
+\node[process, right=2cm of above_threshold] (fallback) {Apply Trending Fallback};
+\node[process, below=1.5cm of above_threshold] (sort) {Rank and Sort Recommendations};
+\node[process, below=1cm of sort] (end) {Deliver via API / Email};
+
+% Edges
+\draw[arrow] (start) -- (fetch_profile);
+\draw[arrow] (fetch_profile) -- (is_suppressed);
+
+\draw[arrow] (is_suppressed) -- node[above] {Yes} (skip);
+\draw[arrow] (is_suppressed) -- node[right] {No} (calc_score);
+
+\draw[arrow] (skip) |- (calc_score);
+
+\draw[arrow] (calc_score) -- (above_threshold);
+
+\draw[arrow] (above_threshold) -- node[above] {No} (fallback);
+\draw[arrow] (above_threshold) -- node[right] {Yes} (sort);
+
+\draw[arrow] (fallback) |- (sort);
+
+\draw[arrow] (sort) -- (end);
+
+\end{tikzpicture}
