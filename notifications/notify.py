@@ -32,7 +32,7 @@ DB_CONFIG = {
     "database": os.getenv("DB_NAME")
 }
 
-VIEW_TRIGGER_COUNT = 3
+INTEREST_SCORE_THRESHOLD = 3.0
 
 MAX_EMAILS_PER_RUN = 50
 
@@ -531,14 +531,14 @@ def check_timeline_triggers():
 
 def check_event_triggers():
     """
-    Find users who viewed the same product 3+ times but haven't bought.
-    Send them a notification immediately — they are showing strong interest.
+    Find users who have crossed the interest score threshold but haven't bought.
+    Send them a notification if they haven't been notified in the last 7 days.
 
     Logic:
-    - browse_count >= 3
+    - interest_score >= 3.0
     - purchase_count = 0 (haven't bought yet)
     - suppress_until is NULL (not suppressed)
-    - No notification sent in last 3 days (avoid spam)
+    - No notification sent in last 7 days (frequency capping via last_notified_at)
     """
     logger.info("\n── Checking event triggers ──────────────")
 
@@ -552,19 +552,17 @@ def check_event_triggers():
             ip.brand,
             ip.price_range,
             ip.browse_count,
+            ip.interest_score,
             u.email
         FROM interest_profiles ip
         JOIN users u ON ip.core_id = u.core_id
-        WHERE ip.browse_count >= %s
+        WHERE ip.interest_score >= %s
           AND ip.purchase_count = 0
           AND ip.suppress_until IS NULL
           AND u.email IS NOT NULL
           AND u.email != ''
-          AND ip.core_id NOT IN (
-              SELECT DISTINCT core_id FROM notifications
-              WHERE sent_at >= DATE_SUB(NOW(), INTERVAL 3 DAY)
-          )
-    """, (VIEW_TRIGGER_COUNT,))
+          AND (ip.last_notified_at IS NULL OR ip.last_notified_at < DATE_SUB(NOW(), INTERVAL 7 DAY))
+    """, (INTEREST_SCORE_THRESHOLD,))
 
     profiles = cursor.fetchall()
     logger.info(f"Found {len(profiles)} users showing strong interest")
@@ -588,7 +586,7 @@ def check_event_triggers():
             skipped_duplicate += 1
             continue
 
-        logger.info(f"\n  User: {p['core_id'][:8]}... | {p['main_category']} | viewed {p['browse_count']}x")
+        logger.info(f"\n  User: {p['core_id'][:8]}... | {p['main_category']} | score {p['interest_score']:.1f}")
 
         recs = find_similar(p["main_category"], p["brand"])
 
@@ -613,6 +611,11 @@ def check_event_triggers():
                         p["main_category"], p["brand"], recs, success)
 
         if success:
+            cursor.execute("""
+                UPDATE interest_profiles
+                SET last_notified_at = NOW()
+                WHERE core_id = %s AND main_category = %s AND brand = %s
+            """, (p["core_id"], p["main_category"], p["brand"]))
             notified += 1
 
     conn.commit()

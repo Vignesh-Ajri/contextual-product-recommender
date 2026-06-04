@@ -5,12 +5,12 @@ __pycache__/
 # Env
 .env
 
-# ML models
-*.pkl
+# ML models (We want to deploy these!)
+# *.pkl
 
 # Data files
 data/*.csv
-ml/products.csv
+# ml/products.csv (We want to deploy this too!)
 
 # Logs
 *.log
