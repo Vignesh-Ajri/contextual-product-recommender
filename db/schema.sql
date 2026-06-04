@@ -85,6 +85,7 @@ CREATE TABLE IF NOT EXISTS interest_profiles (
     total_spent       FLOAT        DEFAULT 0.0,
 
     suppress_until    DATETIME     DEFAULT NULL,
+    last_notified_at  DATETIME     DEFAULT NULL,
 
     updated_at        DATETIME     DEFAULT NOW(),
     FOREIGN KEY (core_id) REFERENCES users(core_id),
@@ -132,50 +133,50 @@ CREATE TABLE IF NOT EXISTS product_lifetime (
 
 INSERT IGNORE INTO product_lifetime (main_category, lifetime_days, description) VALUES
     -- Oral Care
-    ('toothpaste',      30,   'Toothpaste tube — ~1 month'),
-    ('toothbrush',      90,   'Toothbrush — replace every 3 months'),
-    ('mouthwash',       30,   'Mouthwash bottle — ~1 month'),
+    ('toothpaste',      10,   'Toothpaste tube — ~10 days'),
+    ('toothbrush',      15,   'Toothbrush — replace every 15 days'),
+    ('mouthwash',       10,   'Mouthwash bottle — ~10 days'),
 
     -- Hair Care
-    ('shampoo',         45,   'Shampoo bottle — ~45 days'),
-    ('conditioner',     60,   'Conditioner — ~2 months'),
-    ('hair_oil',        45,   'Hair oil bottle — ~45 days'),
-    ('hair_color',      30,   'Hair color — monthly touch-up'),
+    ('shampoo',         15,   'Shampoo bottle — ~15 days'),
+    ('conditioner',     15,   'Conditioner — ~15 days'),
+    ('hair_oil',        15,   'Hair oil bottle — ~15 days'),
+    ('hair_color',      10,   'Hair color — 10 days'),
 
     -- Skin Care
-    ('face_wash',       45,   'Face wash tube — ~45 days'),
-    ('moisturizer',     60,   'Moisturizer jar — ~2 months'),
-    ('sunscreen',       45,   'Sunscreen — ~45 days with daily use'),
-    ('face_cream',      60,   'Face cream — ~2 months'),
-    ('body_lotion',     45,   'Body lotion — ~45 days'),
-    ('lip_balm',        30,   'Lip balm — ~1 month'),
+    ('face_wash',       10,   'Face wash tube — ~10 days'),
+    ('moisturizer',     15,   'Moisturizer jar — ~15 days'),
+    ('sunscreen',       10,   'Sunscreen — ~10 days'),
+    ('face_cream',      15,   'Face cream — ~15 days'),
+    ('body_lotion',     15,   'Body lotion — ~15 days'),
+    ('lip_balm',        10,   'Lip balm — ~10 days'),
 
     -- Cosmetics
-    ('lipstick',        120,  'Lipstick — ~4 months'),
-    ('foundation',      90,   'Foundation — ~3 months'),
-    ('mascara',         90,   'Mascara — ~3 months (replace for hygiene)'),
-    ('eyeliner',        90,   'Eyeliner — ~3 months'),
-    ('nail_polish',     120,  'Nail polish — ~4 months'),
-    ('compact_powder',  90,   'Compact powder — ~3 months'),
+    ('lipstick',        15,   'Lipstick — ~15 days'),
+    ('foundation',      15,   'Foundation — ~15 days'),
+    ('mascara',         15,   'Mascara — ~15 days'),
+    ('eyeliner',        15,   'Eyeliner — ~15 days'),
+    ('nail_polish',     15,   'Nail polish — ~15 days'),
+    ('compact_powder',  15,   'Compact powder — ~15 days'),
 
     -- Personal Care
-    ('soap',            30,   'Soap bar/body wash — ~1 month'),
-    ('deodorant',       30,   'Deodorant — ~1 month'),
-    ('perfume',         180,  'Perfume bottle — ~6 months'),
-    ('razor',           14,   'Disposable razor — ~2 weeks'),
-    ('shaving_cream',   60,   'Shaving cream — ~2 months'),
-    ('hand_sanitizer',  30,   'Hand sanitizer — ~1 month'),
+    ('soap',            10,   'Soap bar/body wash — ~10 days'),
+    ('deodorant',       15,   'Deodorant — ~15 days'),
+    ('perfume',         15,   'Perfume bottle — ~15 days'),
+    ('razor',           5,    'Disposable razor — ~5 days'),
+    ('shaving_cream',   15,   'Shaving cream — ~15 days'),
+    ('hand_sanitizer',  10,   'Hand sanitizer — ~10 days'),
 
     -- Household Essentials
-    ('detergent',       30,   'Laundry detergent — ~1 month'),
-    ('dishwash',        30,   'Dishwash liquid — ~1 month'),
-    ('floor_cleaner',   45,   'Floor cleaner — ~45 days'),
-    ('tissue_paper',    14,   'Tissue paper pack — ~2 weeks'),
-    ('toilet_cleaner',  30,   'Toilet cleaner — ~1 month'),
-    ('air_freshener',   30,   'Air freshener — ~1 month'),
+    ('detergent',       15,   'Laundry detergent — ~15 days'),
+    ('dishwash',        10,   'Dishwash liquid — ~10 days'),
+    ('floor_cleaner',   15,   'Floor cleaner — ~15 days'),
+    ('tissue_paper',    5,    'Tissue paper pack — ~5 days'),
+    ('toilet_cleaner',  15,   'Toilet cleaner — ~15 days'),
+    ('air_freshener',   15,   'Air freshener — ~15 days'),
 
     -- Fallback
-    ('unknown',         45,   'Default fallback — 45 days');
+    ('unknown',         15,   'Default fallback — 15 days');
 
 -- ═══════════════════════════════════════════════════════════════
 -- MIGRATION: Add new indexes if tables already exist
@@ -187,7 +188,8 @@ ALTER TABLE interest_profiles
     ADD COLUMN IF NOT EXISTS engagement_score FLOAT DEFAULT 0.0,
     ADD COLUMN IF NOT EXISTS cart_count       INT   DEFAULT 0,
     ADD COLUMN IF NOT EXISTS dismiss_count    INT   DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS total_spent      FLOAT DEFAULT 0.0;
+    ADD COLUMN IF NOT EXISTS total_spent      FLOAT DEFAULT 0.0,
+    ADD COLUMN IF NOT EXISTS last_notified_at DATETIME DEFAULT NULL;
 
 ALTER TABLE interactions
     ADD COLUMN IF NOT EXISTS product_name  VARCHAR(255) DEFAULT NULL,
