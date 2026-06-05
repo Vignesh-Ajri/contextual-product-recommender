@@ -5,7 +5,7 @@ RAW_FILE   = "data/2019-Oct.csv"
 CLEAN_FILE = "data/2019-Oct-cleaned.csv"
 
 print("Loading raw data...")
-df = pd.read_csv(RAW_FILE, nrows=500000)
+df = pd.read_csv(RAW_FILE, nrows=700000)
 
 print(f"Raw data shape: {df.shape}")
 print(f"Columns found: {list(df.columns)}")
