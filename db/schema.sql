@@ -182,19 +182,19 @@ INSERT IGNORE INTO product_lifetime (main_category, lifetime_days, description) 
 -- MIGRATION: Add new indexes if tables already exist
 -- ═══════════════════════════════════════════════════════════════
 
-ALTER TABLE interest_profiles
-    ADD COLUMN IF NOT EXISTS browse_score     FLOAT DEFAULT 0.0,
-    ADD COLUMN IF NOT EXISTS purchase_score   FLOAT DEFAULT 0.0,
-    ADD COLUMN IF NOT EXISTS engagement_score FLOAT DEFAULT 0.0,
-    ADD COLUMN IF NOT EXISTS cart_count       INT   DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS dismiss_count    INT   DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS total_spent      FLOAT DEFAULT 0.0,
-    ADD COLUMN IF NOT EXISTS last_notified_at DATETIME DEFAULT NULL;
+-- ALTER TABLE interest_profiles
+--     ADD COLUMN IF NOT EXISTS browse_score     FLOAT DEFAULT 0.0,
+--     ADD COLUMN IF NOT EXISTS purchase_score   FLOAT DEFAULT 0.0,
+--     ADD COLUMN IF NOT EXISTS engagement_score FLOAT DEFAULT 0.0,
+--     ADD COLUMN IF NOT EXISTS cart_count       INT   DEFAULT 0,
+--     ADD COLUMN IF NOT EXISTS dismiss_count    INT   DEFAULT 0,
+--     ADD COLUMN IF NOT EXISTS total_spent      FLOAT DEFAULT 0.0,
+--     ADD COLUMN IF NOT EXISTS last_notified_at DATETIME DEFAULT NULL;
 
-ALTER TABLE interactions
-    ADD COLUMN IF NOT EXISTS product_name  VARCHAR(255) DEFAULT NULL,
-    ADD COLUMN IF NOT EXISTS search_query  VARCHAR(255) DEFAULT NULL,
-    ADD COLUMN IF NOT EXISTS session_id    VARCHAR(100) DEFAULT NULL,
-    ADD COLUMN IF NOT EXISTS device_type   VARCHAR(50)  DEFAULT NULL;
+-- ALTER TABLE interactions
+--     ADD COLUMN IF NOT EXISTS product_name  VARCHAR(255) DEFAULT NULL,
+--     ADD COLUMN IF NOT EXISTS search_query  VARCHAR(255) DEFAULT NULL,
+--     ADD COLUMN IF NOT EXISTS session_id    VARCHAR(100) DEFAULT NULL,
+--     ADD COLUMN IF NOT EXISTS device_type   VARCHAR(50)  DEFAULT NULL;
 
 SHOW TABLES;
