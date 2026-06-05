@@ -1,4 +1,5 @@
 import re
+import pathlib
 import pandas as pd
 import joblib
 import uuid
@@ -1092,23 +1093,26 @@ def swagger_spec():
         }
     })
 
-import pathlib
 _PROJECT_ROOT = str(pathlib.Path(__file__).resolve().parent.parent)
+
 
 @app.route("/dashboard")
 def dashboard():
     """Serves the dashboard HTML file."""
     return send_from_directory(_PROJECT_ROOT, "dashboard.html")
 
+
 @app.route("/dashboard.css")
 def dashboard_css():
     """Serves the dashboard CSS file."""
     return send_from_directory(_PROJECT_ROOT, "dashboard.css")
 
+
 @app.route("/dashboard.js")
 def dashboard_js():
     """Serves the dashboard JS file."""
     return send_from_directory(_PROJECT_ROOT, "dashboard.js")
+
 
 @app.route("/api/similar-users/<user_id>", methods=["GET"])
 @jwt_required()

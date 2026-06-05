@@ -1,7 +1,4 @@
-version: '3.8'
-
 services:
-
   # ── MySQL Database ──────────────
   mysql:
     image: mysql:8.0
@@ -41,8 +38,8 @@ services:
       KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
-      KAFKA_LOG_RETENTION_MS: 604800000       # 7-day retention
-      KAFKA_LOG_RETENTION_BYTES: 1073741824   # 1GB max per partition
+      KAFKA_LOG_RETENTION_MS: 604800000 # 7-day retention
+      KAFKA_LOG_RETENTION_BYTES: 1073741824 # 1GB max per partition
     volumes:
       - kafka_data:/var/lib/kafka/data
     depends_on:
