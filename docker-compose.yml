@@ -1,5 +1,35 @@
+# ============================================================
+# CPRP — Docker Compose
+# All services your project actually uses:
+#
+#   mysql      — stores user profiles, interactions (consumer writes here)
+#   zookeeper  — Kafka coordination
+#   kafka      — event streaming (producer → kafka → consumer)
+#   redis      — recommendation cache (api reads/writes)
+#   api        — FastAPI recommendation server
+#   consumer   — Kafka consumer worker (writes to MySQL)
+#
+# Usage:
+#   docker-compose up -d                          # start everything
+#   docker-compose up mysql zookeeper kafka redis -d  # infra only
+#   docker-compose logs -f consumer               # watch event processing
+#   docker-compose logs -f api                    # watch API
+#   docker-compose down                           # stop all
+#
+# Recommended dev workflow:
+#   docker-compose up mysql zookeeper kafka redis -d
+#   python kafka/consumer.py                      # terminal 1
+#   uvicorn api.app:app --reload --port 8000      # terminal 2
+#   python kafka/producer.py                      # terminal 3
+# ============================================================
+
+version: "3.9"
+
 services:
-  # ── MySQL Database ──────────────
+
+  # ── MySQL ─────────────────────────────────────────────────
+  # consumer.py writes all 5 Epsilon layers here.
+  # Must be healthy before consumer or API starts.
   mysql:
     image: mysql:8.0
     container_name: cprp_mysql
@@ -7,17 +37,18 @@ services:
       - "3307:3306"
     environment:
       MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
-      MYSQL_DATABASE: ${DB_NAME}
+      MYSQL_DATABASE:      ${DB_NAME}
     volumes:
       - mysql_data:/var/lib/mysql
       - ./db/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  # ── Zookeeper ──────────────────
+  # ── Zookeeper ─────────────────────────────────────────────
   zookeeper:
     image: zookeeper:3.7
     container_name: cprp_zookeeper
@@ -25,27 +56,110 @@ services:
       - "2181:2181"
     environment:
       ZOO_MY_ID: 1
+    volumes:
+      - zookeeper_data:/data
+      - zookeeper_logs:/datalog
+    restart: unless-stopped
 
-  # ── Kafka ──────────────────────
+  # ── Kafka ─────────────────────────────────────────────────
+  # Topic: user_events  (producer → kafka → consumer → mysql)
+  # Two listeners: localhost:9092 (host), kafka:29092 (Docker internal)
   kafka:
     image: confluentinc/cp-kafka:7.4.0
     container_name: cprp_kafka
     ports:
       - "9092:9092"
     environment:
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
-      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
+      KAFKA_ZOOKEEPER_CONNECT:              zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS:           PLAINTEXT://localhost:9092,PLAINTEXT_INT://kafka:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INT:PLAINTEXT
+      KAFKA_LISTENERS:                      PLAINTEXT://0.0.0.0:9092,PLAINTEXT_INT://0.0.0.0:29092
+      KAFKA_INTER_BROKER_LISTENER_NAME:     PLAINTEXT_INT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
-      KAFKA_LOG_RETENTION_MS: 604800000 # 7-day retention
-      KAFKA_LOG_RETENTION_BYTES: 1073741824 # 1GB max per partition
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE:      "true"
+      KAFKA_LOG_RETENTION_MS:               604800000
+      KAFKA_LOG_RETENTION_BYTES:            1073741824
     volumes:
       - kafka_data:/var/lib/kafka/data
     depends_on:
-      - zookeeper
+      zookeeper:
+        condition: service_started
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
 
-# ── Persistent storage ───────────
+  # ── Redis ─────────────────────────────────────────────────
+  # Caches /recommend results. API reads/writes here.
+  redis:
+    image: redis:7-alpine
+    container_name: cprp_redis
+    ports:
+      - "6379:6379"
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ── FastAPI ───────────────────────────────────────────────
+  api:
+    build: .
+    container_name: cprp_api
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - KAFKA_TOPIC_EVENTS=user_events
+    volumes:
+      - ./ml:/app/ml
+      - ./data:/app/data
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    restart: unless-stopped
+    command: uvicorn api.app:app --host 0.0.0.0 --port 8000
+
+  # ── Kafka Consumer Worker ─────────────────────────────────
+  # Runs your existing kafka/consumer.py as a Docker service.
+  # Reads user_events → writes all 5 Epsilon layers to MySQL.
+  consumer:
+    build: .
+    container_name: cprp_consumer
+    env_file: .env
+    environment:
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+    volumes:
+      - ./kafka:/app/kafka
+      - ./data:/app/data
+    depends_on:
+      mysql:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    restart: unless-stopped
+    command: python kafka/consumer.py
+
 volumes:
   mysql_data:
+  zookeeper_data:
+  zookeeper_logs:
   kafka_data:
+  redis_data:

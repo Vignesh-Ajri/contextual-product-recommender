@@ -2,10 +2,13 @@ import json
 import uuid
 import logging
 import time
+import traceback
+import re
 import mysql.connector
 from datetime import datetime, timedelta
 from kafka import KafkaConsumer
 import os
+import joblib
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -15,6 +18,14 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S"
 )
 logger = logging.getLogger("consumer")
+
+try:
+    IDENTITY_GRAPH_MAP = joblib.load("ml/identity_graph_map.pkl")
+    logger.info("Loaded Identity Graph Map")
+except Exception:
+    IDENTITY_GRAPH_MAP = {}
+    logger.info("Identity Graph Map not found. Defaulting to empty.")
+
 
 KAFKA_SERVER    = "localhost:9092"
 TOPIC_NAME      = "user_events"
@@ -104,6 +115,8 @@ def validate_event(event):
         "device_type":  str(event.get("device_type",  "")).strip()[:50],
         "platform":     str(event.get("platform",     "")).strip()[:50],
         "language":     str(event.get("language",     "")).strip()[:20],
+        "ip_address":   str(event.get("ip_address",   "")).strip()[:50],
+        "email_hash":   str(event.get("email_hash",   "")).strip()[:100],
     }
 
     valid_types = {"view", "search", "cart", "purchase", "dismiss", "click"}
@@ -113,36 +126,54 @@ def validate_event(event):
     return True, cleaned, None
 
 
-def resolve_identity(cursor, user_id, device_id=None):
+def resolve_identity(cursor, user_id, device_id=None, ip_address=None, email_hash=None, user_email=None):
     """
-    Epsilon Layer 1: Link user_id and device_id to one Core ID.
+    Epsilon Layer 1: Link identifiers to one Core ID using the Identity Graph.
     """
-    cursor.execute(
-        "SELECT core_id FROM identities WHERE identifier_type='user_id' AND identifier_value=%s",
-        (str(user_id),)
-    )
-    result = cursor.fetchone()
-
-    if result:
-        core_id = result[0]
-    else:
-        core_id = str(uuid.uuid4())
-        cursor.execute("INSERT INTO users (core_id) VALUES (%s)", (core_id,))
-        cursor.execute(
-            "INSERT INTO identities (core_id, identifier_type, identifier_value) VALUES (%s,%s,%s)",
-            (core_id, "user_id", str(user_id))
-        )
-
-    if device_id and device_id.strip():
-        cursor.execute(
-            "SELECT id FROM identities WHERE identifier_type='device_id' AND identifier_value=%s",
-            (str(device_id),)
-        )
+    # 1. Try to find the identity in the graph map using any identifier
+    graph_core_id = None
+    if email_hash and ("email", email_hash) in IDENTITY_GRAPH_MAP:
+        graph_core_id = IDENTITY_GRAPH_MAP[("email", email_hash)]
+    elif device_id and ("device", device_id) in IDENTITY_GRAPH_MAP:
+        graph_core_id = IDENTITY_GRAPH_MAP[("device", device_id)]
+    elif ip_address and ("ip", ip_address) in IDENTITY_GRAPH_MAP:
+        graph_core_id = IDENTITY_GRAPH_MAP[("ip", ip_address)]
+    
+    if graph_core_id:
+        # Check if graph_core_id exists in users table, else create
+        cursor.execute("SELECT core_id FROM users WHERE core_id=%s", (graph_core_id,))
         if not cursor.fetchone():
+            cursor.execute("INSERT IGNORE INTO users (core_id) VALUES (%s)", (graph_core_id,))
+        core_id = graph_core_id
+    else:
+        # Fallback to deterministic check
+        cursor.execute(
+            "SELECT core_id FROM identities WHERE identifier_type='user_id' AND identifier_value=%s",
+            (str(user_id),)
+        )
+        result = cursor.fetchone()
+        if result:
+            core_id = result[0]
+        else:
+            core_id = str(uuid.uuid4())
+            cursor.execute("INSERT IGNORE INTO users (core_id) VALUES (%s)", (core_id,))
             cursor.execute(
                 "INSERT IGNORE INTO identities (core_id, identifier_type, identifier_value) VALUES (%s,%s,%s)",
-                (core_id, "device_id", str(device_id))
+                (core_id, "user_id", str(user_id))
             )
+
+    # Now link all provided identifiers to this core_id
+    if device_id and device_id.strip():
+        cursor.execute("INSERT IGNORE INTO identities (core_id, identifier_type, identifier_value) VALUES (%s,%s,%s)", (core_id, "device_id", str(device_id)))
+    if email_hash and email_hash.strip():
+        cursor.execute("INSERT IGNORE INTO identities (core_id, identifier_type, identifier_value) VALUES (%s,%s,%s)", (core_id, "email_hash", str(email_hash)))
+    if ip_address and ip_address.strip():
+        cursor.execute("INSERT IGNORE INTO identities (core_id, identifier_type, identifier_value) VALUES (%s,%s,%s)", (core_id, "ip_address", str(ip_address)))
+        
+    # Store the actual email if provided
+    if user_email and user_email.strip():
+        cursor.execute("UPDATE users SET email = %s WHERE core_id = %s", (str(user_email), core_id))
+        cursor.execute("INSERT IGNORE INTO identities (core_id, identifier_type, identifier_value) VALUES (%s,%s,%s)", (core_id, "email", str(user_email)))
 
     return core_id
 
@@ -238,10 +269,11 @@ def update_interest_profile(cursor, core_id, event):
     - Layer 3: Track purchase counts, total spent
     - Layer 5: Update multi-dimensional interest scores
     """
-    category    = event.get("main_category", "unknown")
-    brand       = event.get("brand",         "unknown")
-    price_range = event.get("price_range",   "unknown")
-    event_type  = event.get("event_type",    "view")
+    category     = event.get("main_category", "unknown")
+    brand        = event.get("brand",         "unknown")
+    price_range  = event.get("price_range",   "unknown")
+    event_type   = event.get("event_type",    "view")
+    product_name = event.get("product_name",  "")
 
     weights = SCORE_WEIGHTS.get(event_type, SCORE_WEIGHTS["view"])
 
@@ -269,11 +301,11 @@ def update_interest_profile(cursor, core_id, event):
          engagement_score, browse_count, cart_count, purchase_count,
          dismiss_count, total_spent) = existing
 
-        # Update scores
-        new_interest    = max(0, interest_score    + weights["interest"])
-        new_browse      = max(0, browse_score      + weights["browse"])
-        new_purchase_s  = max(0, purchase_score    + weights["purchase"])
-        new_engagement  = max(0, engagement_score  + weights["engagement"])
+        # Update scores (capped at 10.0 to prevent infinite inflation)
+        new_interest    = min(10.0, max(0, interest_score    + weights["interest"]))
+        new_browse      = min(10.0, max(0, browse_score      + weights["browse"]))
+        new_purchase_s  = min(10.0, max(0, purchase_score    + weights["purchase"]))
+        new_engagement  = min(10.0, max(0, engagement_score  + weights["engagement"]))
 
         # Update counts
         new_browse_c    = browse_count    + (1 if event_type == "view"     else 0)
@@ -285,9 +317,11 @@ def update_interest_profile(cursor, core_id, event):
         # Calculate suppress_until
         suppress_until = None
         if event_type == "purchase":
-            lifetime = get_lifetime_days(cursor, category)
+            base_lifetime = get_lifetime_days(cursor, category)
+            multiplier = parse_size_multiplier(product_name)
+            lifetime = int(base_lifetime * multiplier)
             suppress_until = datetime.now() + timedelta(days=lifetime)
-            logger.info(f"Suppressing '{category}' for {lifetime} days")
+            logger.info(f"Suppressing '{category}' for {lifetime} days (base {base_lifetime} x {multiplier})")
         elif event_type == "dismiss":
             suppress_until = datetime.now() + timedelta(days=7)
             logger.info(f"Dismissed — suppressing '{category}' for 7 days")
@@ -320,7 +354,9 @@ def update_interest_profile(cursor, core_id, event):
         # New profile row
         suppress_until = None
         if event_type == "purchase":
-            lifetime = get_lifetime_days(cursor, category)
+            base_lifetime = get_lifetime_days(cursor, category)
+            multiplier = parse_size_multiplier(product_name)
+            lifetime = int(base_lifetime * multiplier)
             suppress_until = datetime.now() + timedelta(days=lifetime)
         elif event_type == "dismiss":
             suppress_until = datetime.now() + timedelta(days=7)
@@ -355,6 +391,22 @@ def get_lifetime_days(cursor, category):
     return result[0] if result else 90
 
 
+def parse_size_multiplier(product_name):
+    if not product_name: return 1.0
+    match = re.search(r'(\d+)\s*(ml|g|kg|l)\b', product_name, re.IGNORECASE)
+    if not match: return 1.0
+    
+    val = float(match.group(1))
+    unit = match.group(2).lower()
+    
+    if unit in ['g', 'ml']:
+        return max(0.5, val / 100.0)
+    elif unit in ['kg', 'l']:
+        return max(1.0, (val * 1000) / 100.0)
+    
+    return 1.0
+
+
 def process_event(event):
     is_valid, cleaned_event, error_msg = validate_event(event)
     if not is_valid:
@@ -369,10 +421,13 @@ def process_event(event):
             conn   = get_db_connection()
             cursor = conn.cursor()
 
-            user_id   = event.get("user_id",    "unknown")
-            device_id = event.get("device_id",  "")
+            user_id    = event.get("user_id",    "unknown")
+            device_id  = event.get("device_id",  "")
+            ip_address = event.get("ip_address", "")
+            email_hash = event.get("email_hash", "")
+            user_email = event.get("email", "")
 
-            core_id = resolve_identity(cursor, user_id, device_id)
+            core_id = resolve_identity(cursor, user_id, device_id, ip_address, email_hash, user_email)
 
             save_interaction(cursor, core_id, event)
 

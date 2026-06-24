@@ -1,0 +1,10 @@
+ml/
+data/
+smartshop/
+research_paper/
+.git/
+__pycache__/
+*.pkl
+*.npy
+*.csv
+.env

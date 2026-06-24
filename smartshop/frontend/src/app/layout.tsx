@@ -4,6 +4,9 @@ import "./globals.css";
 import Header from "@/components/layout/Header";
 import Footer from "@/components/layout/Footer";
 import GlobalTracker from "@/components/layout/GlobalTracker";
+import { AuthProvider } from "@/contexts/AuthContext";
+import { CartProvider } from "@/contexts/CartContext";
+import { WishlistProvider } from "@/contexts/WishlistContext";
 
 const inter = Inter({ 
   subsets: ["latin"],
@@ -23,12 +26,18 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${inter.variable} font-sans antialiased min-h-screen flex flex-col`}>
-        <GlobalTracker />
-        <Header />
-        <main className="flex-1">
-          {children}
-        </main>
-        <Footer />
+        <AuthProvider>
+          <CartProvider>
+            <WishlistProvider>
+              <GlobalTracker />
+              <Header />
+              <main className="flex-1">
+                {children}
+              </main>
+              <Footer />
+            </WishlistProvider>
+          </CartProvider>
+        </AuthProvider>
       </body>
     </html>
   );

@@ -5,12 +5,15 @@ __pycache__/
 # Env
 .env
 
-# ML models (We want to deploy these!)
-# *.pkl
+# ML models and artifacts
+*.pkl
+*.npy
+ml/*.pkl
+ml/*.npy
+ml/*.csv
 
 # Data files
 data/*.csv
-# ml/products.csv (We want to deploy this too!)
 
 # Logs
 *.log
@@ -20,3 +23,12 @@ data/*.csv
 Thumbs.db
 folders.txt
 cprp_deep_technical_report.md
+ml/CPRP_Phase2_Setup_Guide.docx
+*.sqlite3
+smartshop/backend/db.sqlite3
+Optimizing CPRP Recommendation Architecture.md
+cp-recommendation_presentation.pdf
+
+# Documentations and reports (local only)
+report/
+research_paper/

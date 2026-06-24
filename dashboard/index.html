@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CPRP Admin Dashboard</title>
+    <link rel="stylesheet" href="/dashboard/static/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <div class="sidebar-brand">
+            <span class="brand-icon">◈</span>
+            <span class="brand-text">CPRP</span>
+        </div>
+        <nav class="sidebar-nav">
+            <a href="#" class="nav-item active" data-tab="overview">
+                <span class="nav-icon">⊞</span> Overview
+            </a>
+            <a href="#" class="nav-item" data-tab="profiles">
+                <span class="nav-icon">⊡</span> User Profiles
+            </a>
+            <a href="#" class="nav-item" data-tab="lifetimes">
+                <span class="nav-icon">⊙</span> Product Lifetimes
+            </a>
+            <a href="#" class="nav-item" data-tab="activity">
+                <span class="nav-icon">⊘</span> Activity Feed
+            </a>
+        </nav>
+        <div class="sidebar-footer">
+            <span class="status-dot"></span> Engine Online
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <header class="top-bar">
+            <h1 id="page-title">Overview</h1>
+            <button class="refresh-btn" onclick="loadCurrentTab()">↻ Refresh</button>
+        </header>
+
+        <!-- Overview Tab -->
+        <section id="tab-overview" class="tab-content active">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-value" id="stat-users">—</div>
+                    <div class="stat-label">Total Users</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="stat-email">—</div>
+                    <div class="stat-label">Users with Email</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="stat-interactions">—</div>
+                    <div class="stat-label">Total Interactions</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="stat-profiled">—</div>
+                    <div class="stat-label">Profiled Users</div>
+                </div>
+                <div class="stat-card accent">
+                    <div class="stat-value" id="stat-high-interest">—</div>
+                    <div class="stat-label">High Interest Alerts</div>
+                </div>
+                <div class="stat-card warn">
+                    <div class="stat-value" id="stat-suppressed">—</div>
+                    <div class="stat-label">Suppressed Profiles</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="stat-categories">—</div>
+                    <div class="stat-label">Product Categories</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Profiles Tab -->
+        <section id="tab-profiles" class="tab-content">
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>User</th>
+                            <th>Category</th>
+                            <th>Brand</th>
+                            <th>Interest</th>
+                            <th>Browses</th>
+                            <th>Carts</th>
+                            <th>Purchases</th>
+                            <th>Spent</th>
+                            <th>Suppressed Until</th>
+                        </tr>
+                    </thead>
+                    <tbody id="profiles-body"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Lifetimes Tab -->
+        <section id="tab-lifetimes" class="tab-content">
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Category</th>
+                            <th>Lifetime (Days)</th>
+                            <th>Description</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="lifetimes-body"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Activity Tab -->
+        <section id="tab-activity" class="tab-content">
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>User</th>
+                            <th>Event</th>
+                            <th>Category</th>
+                            <th>Brand</th>
+                            <th>Product</th>
+                        </tr>
+                    </thead>
+                    <tbody id="activity-body"></tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+
+    <script src="/dashboard/static/app.js"></script>
+</body>
+</html>

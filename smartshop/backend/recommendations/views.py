@@ -11,13 +11,13 @@ class CPRPRecommendationView(APIView):
     """Proxy requests to the CPRP recommendation endpoint."""
     
     def get(self, request, user_id, *args, **kwargs):
-        url = f"{settings.CPRP_API_URL}/api/recommend/{user_id}"
+        url = f"{settings.CPRP_API_URL}/profile/{user_id}"
         
         try:
             # We might need to login to CPRP to get a token, but for now assuming we bypass or have a service token.
             # In CPRP app.py, /api/login requires admin/admin123
             login_resp = requests.post(
-                f"{settings.CPRP_API_URL}/api/login",
+                f"{settings.CPRP_API_URL}/login",
                 json={"username": "admin", "password": "admin123"},
                 timeout=5
             )

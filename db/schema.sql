@@ -133,50 +133,50 @@ CREATE TABLE IF NOT EXISTS product_lifetime (
 
 INSERT IGNORE INTO product_lifetime (main_category, lifetime_days, description) VALUES
     -- Oral Care
-    ('toothpaste',      10,   'Toothpaste tube — ~10 days'),
-    ('toothbrush',      15,   'Toothbrush — replace every 15 days'),
-    ('mouthwash',       10,   'Mouthwash bottle — ~10 days'),
+    ('toothpaste',10,   'Toothpaste tube — ~10 days'),
+    ('toothbrush',15,   'Toothbrush — replace every 15 days'),
+    ('mouthwash', 10,   'Mouthwash bottle — ~10 days'),
 
     -- Hair Care
-    ('shampoo',         15,   'Shampoo bottle — ~15 days'),
+    ('shampoo',   15,   'Shampoo bottle — ~15 days'),
     ('conditioner',     15,   'Conditioner — ~15 days'),
-    ('hair_oil',        15,   'Hair oil bottle — ~15 days'),
-    ('hair_color',      10,   'Hair color — 10 days'),
+    ('hair_oil',  15,   'Hair oil bottle — ~15 days'),
+    ('hair_color', 10,   'Hair color — 10 days'),
 
     -- Skin Care
-    ('face_wash',       10,   'Face wash tube — ~10 days'),
+    ('face_wash', 10,   'Face wash tube — ~10 days'),
     ('moisturizer',     15,   'Moisturizer jar — ~15 days'),
-    ('sunscreen',       10,   'Sunscreen — ~10 days'),
-    ('face_cream',      15,   'Face cream — ~15 days'),
+    ('sunscreen', 10,   'Sunscreen — ~10 days'),
+    ('face_cream',15,   'Face cream — ~15 days'),
     ('body_lotion',     15,   'Body lotion — ~15 days'),
-    ('lip_balm',        10,   'Lip balm — ~10 days'),
+    ('lip_balm',  10,   'Lip balm — ~10 days'),
 
     -- Cosmetics
-    ('lipstick',        15,   'Lipstick — ~15 days'),
-    ('foundation',      15,   'Foundation — ~15 days'),
-    ('mascara',         15,   'Mascara — ~15 days'),
-    ('eyeliner',        15,   'Eyeliner — ~15 days'),
+    ('lipstick',  15,   'Lipstick — ~15 days'),
+    ('foundation',15,   'Foundation — ~15 days'),
+    ('mascara',   15,   'Mascara — ~15 days'),
+    ('eyeliner',  15,   'Eyeliner — ~15 days'),
     ('nail_polish',     15,   'Nail polish — ~15 days'),
     ('compact_powder',  15,   'Compact powder — ~15 days'),
 
     -- Personal Care
-    ('soap',            10,   'Soap bar/body wash — ~10 days'),
-    ('deodorant',       15,   'Deodorant — ~15 days'),
-    ('perfume',         15,   'Perfume bottle — ~15 days'),
-    ('razor',           5,    'Disposable razor — ~5 days'),
+    ('soap',10,   'Soap bar/body wash — ~10 days'),
+    ('deodorant', 15,   'Deodorant — ~15 days'),
+    ('perfume',   15,   'Perfume bottle — ~15 days'),
+    ('razor',     5,    'Disposable razor — ~5 days'),
     ('shaving_cream',   15,   'Shaving cream — ~15 days'),
     ('hand_sanitizer',  10,   'Hand sanitizer — ~10 days'),
 
     -- Household Essentials
-    ('detergent',       15,   'Laundry detergent — ~15 days'),
-    ('dishwash',        10,   'Dishwash liquid — ~10 days'),
+    ('detergent', 15,   'Laundry detergent — ~15 days'),
+    ('dishwash',  10,   'Dishwash liquid — ~10 days'),
     ('floor_cleaner',   15,   'Floor cleaner — ~15 days'),
     ('tissue_paper',    5,    'Tissue paper pack — ~5 days'),
     ('toilet_cleaner',  15,   'Toilet cleaner — ~15 days'),
     ('air_freshener',   15,   'Air freshener — ~15 days'),
 
     -- Fallback
-    ('unknown',         15,   'Default fallback — 15 days');
+    ('unknown',   15,   'Default fallback — 15 days');
 
 -- ═══════════════════════════════════════════════════════════════
 -- MIGRATION: Add new indexes if tables already exist
@@ -186,7 +186,7 @@ INSERT IGNORE INTO product_lifetime (main_category, lifetime_days, description) 
 --     ADD COLUMN IF NOT EXISTS browse_score     FLOAT DEFAULT 0.0,
 --     ADD COLUMN IF NOT EXISTS purchase_score   FLOAT DEFAULT 0.0,
 --     ADD COLUMN IF NOT EXISTS engagement_score FLOAT DEFAULT 0.0,
---     ADD COLUMN IF NOT EXISTS cart_count       INT   DEFAULT 0,
+--     ADD COLUMN IF NOT EXISTS cart_count INT   DEFAULT 0,
 --     ADD COLUMN IF NOT EXISTS dismiss_count    INT   DEFAULT 0,
 --     ADD COLUMN IF NOT EXISTS total_spent      FLOAT DEFAULT 0.0,
 --     ADD COLUMN IF NOT EXISTS last_notified_at DATETIME DEFAULT NULL;
