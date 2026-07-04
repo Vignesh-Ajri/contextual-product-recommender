@@ -2,7 +2,7 @@
 // CPRP Admin Dashboard — App Logic
 // ═══════════════════════════════════════════════════════════
 
-const API = window.location.origin;
+const API = 'http://localhost:5000';
 let currentTab = 'overview';
 
 // ── Tab Navigation ────────────────────────────────────────
