@@ -11,10 +11,13 @@ Usage:
 import json
 import time
 import pandas as pd
+import os
+from dotenv import load_dotenv
 from kafka import KafkaProducer
+load_dotenv()
 
-KAFKA_SERVER = "localhost:9092"
-TOPIC_NAME   = "user_events"
+KAFKA_SERVER = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+TOPIC_NAME   = os.getenv("KAFKA_TOPIC_EVENTS", "user_events")
 CSV_FILE     = "data/fmcg_events.csv"
 DELAY        = 0.05  # 50ms between events (20 events/sec)
 

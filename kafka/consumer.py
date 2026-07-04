@@ -27,8 +27,8 @@ except Exception:
     logger.info("Identity Graph Map not found. Defaulting to empty.")
 
 
-KAFKA_SERVER    = "localhost:9092"
-TOPIC_NAME      = "user_events"
+KAFKA_SERVER    = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+TOPIC_NAME      = os.getenv("KAFKA_TOPIC_EVENTS", "user_events")
 GROUP_ID        = "cprp_consumer"
 MAX_DB_RETRIES  = 3
 DB_RETRY_DELAY  = 2
@@ -36,7 +36,7 @@ MAX_EVENT_RETRIES = 3
 
 DB_CONFIG = {
     "host":     os.getenv("DB_HOST", "localhost"),
-    "port":     int(os.getenv("DB_PORT")),
+    "port":     int(os.getenv("DB_PORT", 3307)),
     "user":     os.getenv("DB_USER"),
     "password": os.getenv("DB_PASSWORD"),
     "database": os.getenv("DB_NAME")
