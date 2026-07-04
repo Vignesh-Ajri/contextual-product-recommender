@@ -9,9 +9,11 @@ import threading
 
 logger = logging.getLogger(__name__)
 
-def forward_to_cprp(event_data, user_email=""):
+def forward_to_cprp(event_data, user_email="", user_demographics=None):
     """Forward the event to the existing CPRP Flask API in a background thread."""
-    
+    if user_demographics is None:
+        user_demographics = {}
+        
     cprp_payload = {
         "user_id": event_data.get('user') or event_data.get('user_id') or event_data.get('session_id') or 'anonymous',
         "event_type": event_data.get('event_type') or 'view',
@@ -24,12 +26,16 @@ def forward_to_cprp(event_data, user_email=""):
         "device_type": event_data.get('device_type') or 'desktop',
         "platform": event_data.get('platform') or 'web',
         "email": user_email,
+        # Demographic and Location Data
+        "age_group": user_demographics.get("age_group", ""),
+        "gender": user_demographics.get("gender", ""),
+        "city": user_demographics.get("city", ""),
+        "state": user_demographics.get("state", ""),
+        "country": user_demographics.get("country", "India"),
     }
 
     url = f"{settings.CPRP_API_URL}/event"
     try:
-        # Assuming CPRP allows unauthenticated events or we need a service token. 
-        # Using a timeout to not block the thread indefinitely
         response = requests.post(url, json=cprp_payload, timeout=5)
         if response.status_code in [200, 201]:
             logger.info("Successfully forwarded event to CPRP.")
@@ -47,16 +53,38 @@ class TrackEventView(generics.CreateAPIView):
     def create(self, request, *args, **kwargs):
         data = request.data.copy()
         user_email = ""
+        user_demographics = {
+            "age_group": "",
+            "gender": "",
+            "city": "",
+            "state": "",
+            "country": "India"
+        }
         
         if request.user.is_authenticated:
             data['user'] = request.user.id
             user_email = request.user.email
+            
+            # Fetch address if it exists
+            address = request.user.addresses.filter(is_default=True).first() or request.user.addresses.first()
+            if address:
+                user_demographics['city'] = address.city
+                user_demographics['state'] = address.state
+                user_demographics['country'] = address.country
+            
+            # Deterministically derive mock age/gender based on email hash for stable profiling
+            email_hash_val = sum(ord(c) for c in user_email)
+            genders = ["male", "female"]
+            age_groups = ["18-24", "25-34", "35-44", "45-54"]
+            
+            user_demographics['gender'] = genders[email_hash_val % len(genders)]
+            user_demographics['age_group'] = age_groups[email_hash_val % len(age_groups)]
             
         serializer = self.get_serializer(data=data)
         serializer.is_valid(raise_exception=True)
         self.perform_create(serializer)
         
         # Async forward to CPRP
-        threading.Thread(target=forward_to_cprp, args=(serializer.data, user_email)).start()
+        threading.Thread(target=forward_to_cprp, args=(serializer.data, user_email, user_demographics)).start()
         
         return Response(serializer.data, status=status.HTTP_201_CREATED)
