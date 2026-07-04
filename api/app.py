@@ -270,22 +270,22 @@ def admin_activity(limit: int = Query(20, ge=1, le=100)):
 
 # ── Schemas ────────────────────────────────────────────────────
 class EventRequest(BaseModel):
-    user_id:     str = Field(..., max_length=100, example="vignesh_001")
-    event_type:  str = Field(..., max_length=50, example="purchase",
+    user_id:     str = Field(..., max_length=100, json_schema_extra={"example": "vignesh_001"})
+    event_type:  str = Field(..., max_length=50, json_schema_extra={"example": "purchase"},
                              description="view|search|cart|wishlist|purchase|ignore|dismiss")
-    category:    str = Field(..., max_length=100, example="electronics")
-    brand:       str = Field(..., max_length=100, example="samsung")
-    price_range: str = Field("unknown", max_length=50, example="1k-5k")
-    product_name:str = Field("", max_length=255, example="Samsung Galaxy S24")
+    category:    str = Field(..., max_length=100, json_schema_extra={"example": "mouthwash"})
+    brand:       str = Field(..., max_length=100, json_schema_extra={"example": "listerine"})
+    price_range: str = Field("unknown", max_length=50, json_schema_extra={"example": "200-500"})
+    product_name:str = Field("", max_length=255, json_schema_extra={"example": "Listerine Cool Mint"})
     # Optional Epsilon Layer 4 — demographics
-    age_group:   str = Field("", max_length=20, example="25-34")
-    gender:      str = Field("", max_length=20, example="male")
-    city:        str = Field("", max_length=100, example="Bengaluru")
-    state:       str = Field("", max_length=100, example="Karnataka")
-    country:     str = Field("India", max_length=50, example="India")
-    device_type: str = Field("", max_length=50, example="mobile")
-    platform:    str = Field("", max_length=50, example="android")
-    email:       str = Field("", max_length=255, example="user@example.com")
+    age_group:   str = Field("", max_length=20, json_schema_extra={"example": "25-34"})
+    gender:      str = Field("", max_length=20, json_schema_extra={"example": "male"})
+    city:        str = Field("", max_length=100, json_schema_extra={"example": "Bengaluru"})
+    state:       str = Field("", max_length=100, json_schema_extra={"example": "Karnataka"})
+    country:     str = Field("India", max_length=50, json_schema_extra={"example": "India"})
+    device_type: str = Field("", max_length=50, json_schema_extra={"example": "mobile"})
+    platform:    str = Field("", max_length=50, json_schema_extra={"example": "android"})
+    email:       str = Field("", max_length=255, json_schema_extra={"example": "user@example.com"})
 
 
 # ── Endpoints ──────────────────────────────────────────────────
@@ -399,6 +399,84 @@ def ingest_event(req: EventRequest):
         "delivery":  "kafka" if published else "mysql_direct",
         "latency_ms": round((time.time() - t0) * 1000, 2),
     }
+
+
+# 1x1 Transparent GIF Binary
+TRANSPARENT_GIF = b'\x47\x49\x46\x38\x39\x61\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff\x21\xf9\x04\x01\x00\x00\x00\x00\x2c\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02\x4c\x01\x00\x3b'
+
+from fastapi import Request, Response, Cookie
+
+@app.get("/api/v1/pixel.gif", tags=["Analytics"])
+def tracking_pixel(
+    request: Request,
+    event: str = "view",
+    category: str = "unknown",
+    brand: str = "unknown",
+    price_range: str = "unknown",
+    product_name: str = "",
+    visitor_id: Optional[str] = Cookie(None)
+):
+    """
+    Epsilon-Style Tracking Pixel.
+    Exposes a 1x1 transparent image to collect client agent, IP, and set a tracking cookie for anonymous profiling.
+    """
+    set_new_cookie = False
+    # 1. Resolve or set tracking cookie
+    if not visitor_id:
+        import uuid
+        visitor_id = f"px_visitor_{uuid.uuid4().hex[:12]}"
+        set_new_cookie = True
+
+    # 2. Extract header metadata
+    user_agent = request.headers.get("user-agent", "")
+    
+    device_type = "desktop"
+    ua_lower = user_agent.lower()
+    if "mobile" in ua_lower or "android" in ua_lower or "iphone" in ua_lower:
+        device_type = "mobile"
+    elif "tablet" in ua_lower or "ipad" in ua_lower:
+        device_type = "tablet"
+
+    # 3. Create the event payload
+    message = {
+        "user_id":      visitor_id,
+        "event_type":   event,
+        "category":     category,
+        "brand":        brand,
+        "price_range":  price_range,
+        "product_name": product_name,
+        "age_group":    "",
+        "gender":       "",
+        "city":         "",
+        "state":        "",
+        "country":      "India",
+        "device_type":  device_type,
+        "platform":     "web",
+        "source":       "pixel",
+    }
+
+    # 4. Forward to ingestion
+    published = False
+    if kafka_ok and producer:
+        try:
+            producer.send(KAFKA_TOPIC, key=visitor_id, value=message)
+            published = True
+        except Exception:
+            pass
+
+    if not published:
+        try:
+            _direct_mysql_event(
+                visitor_id, event, category, brand, price_range, product_name
+            )
+        except Exception:
+            pass
+
+    # 5. Return 1x1 transparent gif image response and attach cookie
+    res = Response(content=TRANSPARENT_GIF, media_type="image/gif")
+    if set_new_cookie:
+        res.set_cookie(key="visitor_id", value=visitor_id, max_age=31536000, httponly=True)
+    return res
 
 
 @app.get("/recommend/{user_id}", tags=["Recommendations"])
