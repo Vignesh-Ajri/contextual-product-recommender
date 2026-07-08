@@ -99,7 +99,7 @@ def validate_event(event):
     cleaned = {
         "user_id":      str(event.get("user_id",      "")).strip()[:200],
         "event_type":   str(event.get("event_type",   "view")).strip().lower(),
-        "main_category":str(event.get("main_category","unknown")).strip()[:100],
+        "main_category":str(event.get("category") or event.get("main_category", "unknown")).strip()[:100],
         "brand":        str(event.get("brand",        "unknown")).strip()[:100],
         "price_range":  str(event.get("price_range",  "unknown")).strip()[:50],
         "product_name": str(event.get("product_name", "")).strip()[:255],
@@ -117,6 +117,7 @@ def validate_event(event):
         "language":     str(event.get("language",     "")).strip()[:20],
         "ip_address":   str(event.get("ip_address",   "")).strip()[:50],
         "email_hash":   str(event.get("email_hash",   "")).strip()[:100],
+        "email":        str(event.get("email",        "")).strip()[:255],
     }
 
     valid_types = {"view", "search", "cart", "purchase", "dismiss", "click"}
@@ -128,7 +129,7 @@ def validate_event(event):
 
 def resolve_identity(cursor, user_id, device_id=None, ip_address=None, email_hash=None, user_email=None):
     """
-    Epsilon Layer 1: Link identifiers to one Core ID using the Identity Graph.
+    Layer 1: Link identifiers to one Core ID using the Identity Graph.
     """
     # 1. Try to find the identity in the graph map using any identifier
     graph_core_id = None
@@ -180,7 +181,7 @@ def resolve_identity(cursor, user_id, device_id=None, ip_address=None, email_has
 
 def save_interaction(cursor, core_id, event):
     """
-    Epsilon Layer 2: Save every behavioral event with full context.
+    Layer 2: Save every behavioral event with full context.
     Includes search queries, session, device type.
     """
     cursor.execute("""
@@ -191,31 +192,31 @@ def save_interaction(cursor, core_id, event):
         VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
     """, (
         core_id,
-        event.get("event_type",    "view"),
-        event.get("main_category", "unknown"),
-        event.get("brand",         "unknown"),
-        event.get("price_range",   "unknown"),
-        event.get("product_name",  "") or None,
-        event.get("search_query",  "") or None,
-        event.get("session_id",    "") or None,
-        event.get("device_type",   "") or None,
-        event.get("event_time",    datetime.now().isoformat()),
-        event.get("source",        "api")
+        event.get("event_type", "view"),
+        event.get("category") or event.get("main_category", "unknown"),
+        event.get("brand", "unknown"),
+        event.get("price_range", "unknown"),
+        event.get("product_name", "") or None,
+        event.get("search_query", "") or None,
+        event.get("session_id", "") or None,
+        event.get("device_type", "") or None,
+        event.get("event_time", datetime.now().isoformat()),
+        event.get("source", "api")
     ))
 
 def update_demographics(cursor, core_id, event):
     """
-    Epsilon Layer 4: Store basic profile info sent by partner company.
+    Layer 4: Store basic profile info sent by partner company.
     Only updates fields that are actually provided (not empty).
     """
-    age_group   = event.get("age_group",   "")
-    gender      = event.get("gender",      "")
-    city        = event.get("city",        "")
-    state       = event.get("state",       "")
-    country     = event.get("country",     "India")
+    age_group = event.get("age_group", "")
+    gender = event.get("gender", "")
+    city = event.get("city", "")
+    state = event.get("state", "")
+    country = event.get("country", "India")
     device_type = event.get("device_type", "")
-    platform    = event.get("platform",    "")
-    language    = event.get("language",    "")
+    platform = event.get("platform", "")
+    language = event.get("language", "")
 
     if not any([age_group, gender, city, state, device_type, platform, language]):
         return
@@ -229,14 +230,14 @@ def update_demographics(cursor, core_id, event):
     if existing:
         updates = []
         values  = []
-        if age_group:   updates.append("age_group=%s");   values.append(age_group)
-        if gender:      updates.append("gender=%s");      values.append(gender)
-        if city:        updates.append("city=%s");        values.append(city)
-        if state:       updates.append("state=%s");       values.append(state)
-        if country:     updates.append("country=%s");     values.append(country)
+        if age_group: updates.append("age_group=%s"); values.append(age_group)
+        if gender: updates.append("gender=%s"); values.append(gender)
+        if city: updates.append("city=%s"); values.append(city)
+        if state: updates.append("state=%s"); values.append(state)
+        if country: updates.append("country=%s"); values.append(country)
         if device_type: updates.append("device_type=%s"); values.append(device_type)
-        if platform:    updates.append("platform=%s");    values.append(platform)
-        if language:    updates.append("language=%s");    values.append(language)
+        if platform: updates.append("platform=%s"); values.append(platform)
+        if language: updates.append("language=%s"); values.append(language)
         updates.append("updated_at=NOW()")
         values.append(core_id)
 
@@ -252,28 +253,28 @@ def update_demographics(cursor, core_id, event):
             VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
         """, (
             core_id,
-            age_group   or None,
-            gender      or None,
-            city        or None,
-            state       or None,
-            country     or "India",
+            age_group or None,
+            gender or None,
+            city or None,
+            state or None,
+            country or "India",
             device_type or None,
-            platform    or None,
-            language    or None,
+            platform or None,
+            language or None,
         ))
 
 
 def update_interest_profile(cursor, core_id, event):
     """
-    Epsilon Layers 3 + 5:
+    Layers 3 + 5:
     - Layer 3: Track purchase counts, total spent
     - Layer 5: Update multi-dimensional interest scores
     """
-    category     = event.get("main_category", "unknown")
-    brand        = event.get("brand",         "unknown")
-    price_range  = event.get("price_range",   "unknown")
-    event_type   = event.get("event_type",    "view")
-    product_name = event.get("product_name",  "")
+    category = event.get("category") or event.get("main_category", "unknown")
+    brand = event.get("brand", "unknown")
+    price_range = event.get("price_range", "unknown")
+    event_type = event.get("event_type", "view")
+    product_name = event.get("product_name", "")
 
     weights = SCORE_WEIGHTS.get(event_type, SCORE_WEIGHTS["view"])
 
@@ -302,16 +303,16 @@ def update_interest_profile(cursor, core_id, event):
          dismiss_count, total_spent) = existing
 
         # Update scores (capped at 10.0 to prevent infinite inflation)
-        new_interest    = min(10.0, max(0, interest_score    + weights["interest"]))
-        new_browse      = min(10.0, max(0, browse_score      + weights["browse"]))
-        new_purchase_s  = min(10.0, max(0, purchase_score    + weights["purchase"]))
-        new_engagement  = min(10.0, max(0, engagement_score  + weights["engagement"]))
+        new_interest = min(10.0, max(0, interest_score + weights["interest"]))
+        new_browse = min(10.0, max(0, browse_score + weights["browse"]))
+        new_purchase_s = min(10.0, max(0, purchase_score + weights["purchase"]))
+        new_engagement = min(10.0, max(0, engagement_score + weights["engagement"]))
 
         # Update counts
-        new_browse_c    = browse_count    + (1 if event_type == "view"     else 0)
-        new_cart_c      = cart_count      + (1 if event_type == "cart"     else 0)
-        new_purchase_c  = purchase_count  + (1 if event_type == "purchase" else 0)
-        new_dismiss_c   = dismiss_count   + (1 if event_type == "dismiss"  else 0)
+        new_browse_c = browse_count + (1 if event_type == "view" else 0)
+        new_cart_c = cart_count + (1 if event_type == "cart" else 0)
+        new_purchase_c = purchase_count + (1 if event_type == "purchase" else 0)
+        new_dismiss_c = dismiss_count + (1 if event_type == "dismiss" else 0)
         new_total_spent = (total_spent or 0) + (estimated_price if event_type == "purchase" else 0)
 
         # Calculate suppress_until
@@ -328,17 +329,17 @@ def update_interest_profile(cursor, core_id, event):
 
         cursor.execute("""
             UPDATE interest_profiles
-            SET interest_score   = %s,
-                browse_score     = %s,
-                purchase_score   = %s,
+            SET interest_score = %s,
+                browse_score = %s,
+                purchase_score = %s,
                 engagement_score = %s,
-                browse_count     = %s,
-                cart_count       = %s,
-                purchase_count   = %s,
-                dismiss_count    = %s,
-                total_spent      = %s,
-                last_purchased   = %s,
-                suppress_until   = %s,
+                browse_count = %s,
+                cart_count = %s,
+                purchase_count = %s,
+                dismiss_count = %s,
+                total_spent = %s,
+                last_purchased = %s,
+                suppress_until = %s,
                 updated_at       = NOW()
             WHERE profile_id = %s
         """, (
@@ -372,10 +373,10 @@ def update_interest_profile(cursor, core_id, event):
             core_id, category, brand, price_range,
             weights["interest"], weights["browse"],
             weights["purchase"], weights["engagement"],
-            1 if event_type == "view"     else 0,
-            1 if event_type == "cart"     else 0,
+            1 if event_type == "view" else 0,
+            1 if event_type == "cart" else 0,
             1 if event_type == "purchase" else 0,
-            1 if event_type == "dismiss"  else 0,
+            1 if event_type == "dismiss" else 0,
             estimated_price if event_type == "purchase" else 0,
             datetime.now() if event_type == "purchase" else None,
             suppress_until
@@ -418,7 +419,7 @@ def process_event(event):
     for attempt in range(1, MAX_EVENT_RETRIES + 1):
         conn = cursor = None
         try:
-            conn   = get_db_connection()
+            conn = get_db_connection()
             cursor = conn.cursor()
 
             user_id    = event.get("user_id",    "unknown")
@@ -476,7 +477,7 @@ def start_consumer():
         consumer = KafkaConsumer(
             TOPIC_NAME,
             bootstrap_servers  = KAFKA_SERVER,
-            group_id           = GROUP_ID,
+            group_id = GROUP_ID,
             auto_offset_reset  = "earliest",
             value_deserializer = lambda v: json.loads(v.decode("utf-8"))
         )
@@ -496,7 +497,6 @@ def start_consumer():
             errors += 1
         if processed % 50 == 0 and processed > 0:
             logger.info(f"── {processed} processed ({errors} errors) ──")
-
 
 if __name__ == "__main__":
     logger.info("=" * 50)
