@@ -5,7 +5,7 @@ import os
 import joblib
 
 print("=" * 55)
-print("  CPRP — Epsilon-Style Identity Resolution")
+print("  CPRP — Advanced Identity Resolution")
 print("=" * 55)
 
 print("\n1. Loading identity events dataset...")
