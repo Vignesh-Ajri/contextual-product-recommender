@@ -9,13 +9,13 @@ import threading
 
 logger = logging.getLogger(__name__)
 
-def forward_to_cprp(event_data, user_email="", user_demographics=None):
+def forward_to_cprp(event_data, user_email="", user_demographics=None, event_id=None):
     """Forward the event to the existing CPRP Flask API in a background thread."""
     if user_demographics is None:
         user_demographics = {}
         
     cprp_payload = {
-        "user_id": event_data.get('user') or event_data.get('user_id') or event_data.get('session_id') or 'anonymous',
+        "user_id": str(event_data.get('user') or event_data.get('user_id') or event_data.get('session_id') or 'anonymous'),
         "event_type": event_data.get('event_type') or 'view',
         "category": event_data.get('cprp_category') or 'unknown',
         "brand": event_data.get('cprp_brand') or 'unknown',
@@ -39,6 +39,9 @@ def forward_to_cprp(event_data, user_email="", user_demographics=None):
         response = requests.post(url, json=cprp_payload, timeout=5)
         if response.status_code in [200, 201]:
             logger.info("Successfully forwarded event to CPRP.")
+            if event_id:
+                from .models import UserEvent
+                UserEvent.objects.filter(id=event_id).update(synced_to_cprp=True)
         else:
             logger.warning(f"Failed to forward event to CPRP: {response.text}")
     except Exception as e:
@@ -85,6 +88,37 @@ class TrackEventView(generics.CreateAPIView):
         self.perform_create(serializer)
         
         # Async forward to CPRP
-        threading.Thread(target=forward_to_cprp, args=(serializer.data, user_email, user_demographics)).start()
+        threading.Thread(target=forward_to_cprp, args=(serializer.data, user_email, user_demographics, serializer.instance.id)).start()
         
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class RecentEventsView(generics.ListAPIView):
+    """Return the 30 most recent events from SQLite — used for live demo verification."""
+    permission_classes = [AllowAny]
+    serializer_class = UserEventSerializer
+
+    def get_queryset(self):
+        return UserEvent.objects.select_related('user').order_by('-timestamp')[:30]
+
+    def list(self, request, *args, **kwargs):
+        qs = self.get_queryset()
+        data = []
+        for ev in qs:
+            data.append({
+                "id": str(ev.id),
+                "event_type": ev.event_type,
+                "user": ev.user.email if ev.user else None,
+                "session_id": ev.session_id,
+                "cprp_category": ev.cprp_category,
+                "cprp_brand": ev.cprp_brand,
+                "cprp_price_range": ev.cprp_price_range,
+                "cprp_product_name": ev.cprp_product_name,
+                "search_query": ev.search_query,
+                "device_type": ev.device_type,
+                "platform": ev.platform,
+                "page_url": ev.page_url,
+                "synced_to_cprp": ev.synced_to_cprp,
+                "timestamp": ev.timestamp.isoformat(),
+            })
+        return Response({"count": len(data), "events": data})
