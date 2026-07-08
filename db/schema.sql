@@ -25,16 +25,16 @@ CREATE TABLE IF NOT EXISTS identities (
 
 
 CREATE TABLE IF NOT EXISTS user_demographics (
-    demo_id       INT          AUTO_INCREMENT PRIMARY KEY,
-    core_id       VARCHAR(36)  NOT NULL UNIQUE,
-    age_group     VARCHAR(20)  DEFAULT NULL,
-    gender        VARCHAR(20)  DEFAULT NULL,
-    city          VARCHAR(100) DEFAULT NULL,
-    state         VARCHAR(100) DEFAULT NULL,
-    country       VARCHAR(50)  DEFAULT 'India',
-    device_type   VARCHAR(50)  DEFAULT NULL,
-    platform      VARCHAR(50)  DEFAULT NULL,
-    language      VARCHAR(20)  DEFAULT NULL,
+    demo_id INT AUTO_INCREMENT PRIMARY KEY,
+    core_id VARCHAR(36) NOT NULL UNIQUE,
+    age_group VARCHAR(20) DEFAULT NULL,
+    gender VARCHAR(20) DEFAULT NULL,
+    city VARCHAR(100) DEFAULT NULL,
+    state VARCHAR(100) DEFAULT NULL,
+    country VARCHAR(50) DEFAULT 'India',
+    device_type VARCHAR(50) DEFAULT NULL,
+    platform VARCHAR(50) DEFAULT NULL,
+    language VARCHAR(20) DEFAULT NULL,
     updated_at    DATETIME     DEFAULT NOW(),
     FOREIGN KEY (core_id) REFERENCES users(core_id)
 );
@@ -45,10 +45,10 @@ CREATE TABLE IF NOT EXISTS user_demographics (
 
 CREATE TABLE IF NOT EXISTS interactions (
     interaction_id  INT          AUTO_INCREMENT PRIMARY KEY,
-    core_id         VARCHAR(36)  NOT NULL,
-    event_type      VARCHAR(50)  NOT NULL,
+    core_id VARCHAR(36)  NOT NULL,
+    event_type VARCHAR(50)  NOT NULL,
     main_category   VARCHAR(100) DEFAULT NULL,
-    brand           VARCHAR(100) DEFAULT NULL,
+    brand VARCHAR(100) DEFAULT NULL,
     price_range     VARCHAR(50)  DEFAULT NULL,
     product_name    VARCHAR(255) DEFAULT NULL, 
     search_query    VARCHAR(255) DEFAULT NULL,
