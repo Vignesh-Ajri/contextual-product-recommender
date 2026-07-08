@@ -24,6 +24,7 @@ interface Product {
   price: string;
   compare_price: string | null;
   discount_percent: number | null;
+  image_url: string | null;
   emoji: string | null;
   rating: string;
   review_count: number;
@@ -190,10 +191,12 @@ export default function ProductsPage() {
                     className="group bg-white rounded-xl border border-gray-200 overflow-hidden hover:shadow-lg hover:border-blue-200 transition-all duration-300 flex flex-col"
                   >
                     {/* Image */}
-                    <div className="relative aspect-square bg-gray-50 flex items-center justify-center group-hover:bg-blue-50 transition-colors">
-                      <span className="text-6xl transform group-hover:scale-110 transition-transform duration-300">
-                        {product.emoji || "🛍️"}
-                      </span>
+                    <div className="relative aspect-square bg-gray-50 flex items-center justify-center overflow-hidden group-hover:bg-blue-50 transition-colors">
+                      <img 
+                        src="https://placehold.net/product-400x400.png"
+                        alt={product.name}
+                        className="w-full h-full object-cover transform group-hover:scale-105 transition-transform duration-300"
+                      />
                       {product.discount_percent && (
                         <div className="absolute top-2 left-2 bg-red-500 text-white text-xs font-bold px-1.5 py-0.5 rounded">
                           -{product.discount_percent}%
