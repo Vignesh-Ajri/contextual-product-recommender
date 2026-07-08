@@ -1,6 +1,5 @@
 # ============================================================
 # CPRP — FastAPI Application
-# File: api/app.py
 #
 # Endpoints:
 #   GET  /                          — welcome + model info
@@ -13,8 +12,6 @@
 #   GET  /catalog/brands            — list brands (optional filter)
 #   GET  /metrics                   — live P@K / F1@K evaluation
 #
-# Run:
-#   uvicorn api.app:app --reload --port 8000
 # ============================================================
 
 import os
@@ -31,7 +28,6 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from kafka import KafkaProducer
-from kafka.errors import NoBrokersAvailable
 
 from api.recommend_engine import RecommendEngine
 from api import cache
@@ -74,9 +70,6 @@ def init_kafka_producer():
         )
         kafka_ok = True
         print(f"[Kafka] Producer connected → {KAFKA_BOOTSTRAP}")
-    except NoBrokersAvailable:
-        kafka_ok = False
-        print("[Kafka] Broker unavailable — events saved to MySQL only")
     except Exception as e:
         kafka_ok = False
         print(f"[Kafka] Producer error: {e}")
@@ -105,7 +98,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title       = "CPRP — Contextual Product Recommender Platform",
     description = (
-        "Epsilon-style recommendation system. "
+        "Enterprise-style recommendation system. "
         "Hybrid BM25 + ALS + Sentence-Embedding model. "
         "Kafka event streaming → MySQL profiles → ranked recommendations. "
         "Ramaiah Institute of Technology MCA Project."
@@ -128,18 +121,10 @@ import pathlib
 
 DASHBOARD_DIR = pathlib.Path(__file__).resolve().parent.parent / "dashboard"
 if DASHBOARD_DIR.exists():
-    app.mount("/dashboard/static", StaticFiles(directory=str(DASHBOARD_DIR)), name="dashboard_static")
+    app.mount("/dashboard", StaticFiles(directory=str(DASHBOARD_DIR), html=True), name="dashboard")
 
 
 # ── Admin Dashboard Endpoints ──────────────────────────────────
-
-@app.get("/dashboard", tags=["Dashboard"], include_in_schema=False)
-def serve_dashboard():
-    """Serve the admin dashboard HTML page."""
-    index = DASHBOARD_DIR / "index.html"
-    if index.exists():
-        return FileResponse(str(index))
-    raise HTTPException(404, "Dashboard not found")
 
 
 @app.get("/api/admin/stats", tags=["Dashboard"])
@@ -277,7 +262,7 @@ class EventRequest(BaseModel):
     brand:       str = Field(..., max_length=100, json_schema_extra={"example": "listerine"})
     price_range: str = Field("unknown", max_length=50, json_schema_extra={"example": "200-500"})
     product_name:str = Field("", max_length=255, json_schema_extra={"example": "Listerine Cool Mint"})
-    # Optional Epsilon Layer 4 — demographics
+    # Optional Layer 4 — demographics
     age_group:   str = Field("", max_length=20, json_schema_extra={"example": "25-34"})
     gender:      str = Field("", max_length=20, json_schema_extra={"example": "male"})
     city:        str = Field("", max_length=100, json_schema_extra={"example": "Bengaluru"})
@@ -354,21 +339,22 @@ def ingest_event(req: EventRequest):
     t0 = time.time()
 
     message = {
-        "user_id":      req.user_id,
-        "event_type":   req.event_type,
-        "category":     req.category,
-        "brand":        req.brand,
-        "price_range":  req.price_range,
+        "user_id": req.user_id,
+        "event_type": req.event_type,
+        "category": req.category,
+        "brand": req.brand,
+        "price_range": req.price_range,
         "product_name": req.product_name,
         # Layer 4 demographics
-        "age_group":    req.age_group,
-        "gender":       req.gender,
-        "city":         req.city,
-        "state":        req.state,
-        "country":      req.country,
-        "device_type":  req.device_type,
-        "platform":     req.platform,
-        "source":       "api",
+        "age_group": req.age_group,
+        "gender": req.gender,
+        "city": req.city,
+        "state": req.state,
+        "country": req.country,
+        "device_type": req.device_type,
+        "platform": req.platform,
+        "email": req.email,
+        "source": "api",
     }
 
     published = False
@@ -385,18 +371,19 @@ def ingest_event(req: EventRequest):
         _direct_mysql_event(
             req.user_id, req.event_type, req.category,
             req.brand, req.price_range, req.product_name,
+            req.email
         )
 
     # Invalidate stale cached recs for this user
     cache.invalidate_user(req.user_id)
 
     return {
-        "status":    "recorded",
-        "user_id":   req.user_id,
-        "event":     req.event_type,
-        "category":  req.category,
-        "brand":     req.brand,
-        "delivery":  "kafka" if published else "mysql_direct",
+        "status": "recorded",
+        "user_id": req.user_id,
+        "event": req.event_type,
+        "category": req.category,
+        "brand": req.brand,
+        "delivery": "kafka" if published else "mysql_direct",
         "latency_ms": round((time.time() - t0) * 1000, 2),
     }
 
@@ -417,8 +404,7 @@ def tracking_pixel(
     visitor_id: Optional[str] = Cookie(None)
 ):
     """
-    Epsilon-Style Tracking Pixel.
-    Exposes a 1x1 transparent image to collect client agent, IP, and set a tracking cookie for anonymous profiling.
+    Exposes a 1x1 transparent image to collect client agent, IP and set a tracking cookie.
     """
     set_new_cookie = False
     # 1. Resolve or set tracking cookie
@@ -439,20 +425,20 @@ def tracking_pixel(
 
     # 3. Create the event payload
     message = {
-        "user_id":      visitor_id,
-        "event_type":   event,
-        "category":     category,
-        "brand":        brand,
-        "price_range":  price_range,
+        "user_id": visitor_id,
+        "event_type": event,
+        "category": category,
+        "brand": brand,
+        "price_range": price_range,
         "product_name": product_name,
-        "age_group":    "",
-        "gender":       "",
-        "city":         "",
-        "state":        "",
-        "country":      "India",
-        "device_type":  device_type,
-        "platform":     "web",
-        "source":       "pixel",
+        "age_group": "",
+        "gender": "",
+        "city": "",
+        "state": "",
+        "country": "India",
+        "device_type": device_type,
+        "platform": "web",
+        "source": "pixel",
     }
 
     # 4. Forward to ingestion
@@ -507,22 +493,22 @@ def recommend_for_user(
             )
         )
 
-    cat   = interest["category"]
+    cat = interest["category"]
     brand = interest["brand"]
     price = interest["price_range"]
-    days  = interest["days_ago"]
+    days = interest["days_ago"]
 
     # Cache check
     cached = cache.get_recs(cat, brand, price, days, k)
     if cached:
         return {
-            "user_id":       user_id,
-            "core_id":       interest["core_id"],
-            "source":        "cached",
-            "model":         engine.model_label,
-            "top_interest":  interest,
+            "user_id": user_id,
+            "core_id": interest["core_id"],
+            "source": "cached",
+            "model": engine.model_label,
+            "top_interest": interest,
             "recommendations": cached,
-            "latency_ms":    round((time.time() - t0) * 1000, 2),
+            "latency_ms": round((time.time() - t0) * 1000, 2),
         }
 
     # Get suppressed items from MySQL
@@ -535,23 +521,22 @@ def recommend_for_user(
     cache.set_recs(cat, brand, price, days, k, recs)
 
     return {
-        "user_id":         user_id,
-        "core_id":         interest["core_id"],
-        "source":          "personalised",
-        "model":           engine.model_label,
-        "top_interest":    interest,
+        "user_id": user_id,
+        "core_id": interest["core_id"],
+        "source": "personalised",
+        "model": engine.model_label,
+        "top_interest": interest,
         "recommendations": recs,
-        "total":           len(recs),
-        "latency_ms":      round((time.time() - t0) * 1000, 2),
+        "total": len(recs),
+        "latency_ms": round((time.time() - t0) * 1000, 2),
     }
-
 
 @app.get("/recommend/cold/{category}", tags=["Recommendations"])
 def cold_start_recommend(
     category: str,
-    brand:    Optional[str] = Query(None),
-    price:    Optional[str] = Query("unknown"),
-    k:        int           = Query(10, ge=1, le=50),
+    brand: Optional[str] = Query(None),
+    price: Optional[str] = Query("unknown"),
+    k: int = Query(10, ge=1, le=50),
 ):
     """
     Cold-start recommendations — no user history needed.
@@ -565,20 +550,20 @@ def cold_start_recommend(
     recs = engine.recommend(category, brand, price or "unknown",
                             days_ago=0, top_n=k)
     return {
-        "source":          "cold_start",
-        "category":        category,
-        "brand_hint":      brand,
-        "model":           engine.model_label,
+        "source": "cold_start",
+        "category": category,
+        "brand_hint": brand,
+        "model": engine.model_label,
         "recommendations": recs,
-        "total":           len(recs),
-        "latency_ms":      round((time.time() - t0) * 1000, 2),
+        "total": len(recs),
+        "latency_ms": round((time.time() - t0) * 1000, 2),
     }
 
 
 @app.get("/profile/{user_id}", tags=["Profiles"])
 def get_profile(user_id: str):
     """
-    Full Epsilon-style 360 profile from MySQL.
+    Full profile from MySQL.
     Shows all interest profiles, suppression windows, interaction counts.
     """
     try:
@@ -648,13 +633,13 @@ def get_profile(user_id: str):
                 if hasattr(v, "isoformat"): demographics[k] = str(v)
 
         return {
-            "user_id":         user_id,
-            "core_id":         core_id,
-            "total_events":    total_events,
-            "identities":      identities,
+            "user_id": user_id,
+            "core_id": core_id,
+            "total_events": total_events,
+            "identities": identities,
             "interest_profiles": profiles,
-            "demographics":    demographics or {},
-            "profile_count":   len(profiles),
+            "demographics": demographics or {},
+            "profile_count": len(profiles),
         }
 
     except HTTPException:
@@ -704,10 +689,10 @@ def live_metrics():
     sample = products.sample(min(100, len(products)),
                              random_state=int(time.time()) % 100)
     for _, row in sample.iterrows():
-        cat   = str(row["main_category"])
+        cat = str(row["main_category"])
         brand = str(row["brand"])
         price = str(row["price_range"])
-        recs  = engine.recommend(cat, brand, price, days_ago=0, top_n=10)
+        recs = engine.recommend(cat, brand, price, days_ago=0, top_n=10)
         if not recs: continue
 
         for k in K_VALUES:
@@ -734,22 +719,22 @@ def live_metrics():
 
     metrics = {}
     for k in K_VALUES:
-        pk = float(np.mean(results[k]["pk"]))  if results[k]["pk"]   else 0
-        rk = float(np.mean(results[k]["rk"]))  if results[k]["rk"]   else 0
-        f1 = 2*pk*rk/(pk+rk)                   if (pk+rk) > 0       else 0
+        pk = float(np.mean(results[k]["pk"])) if results[k]["pk"] else 0
+        rk = float(np.mean(results[k]["rk"])) if results[k]["rk"] else 0
+        f1 = 2 * pk * rk / (pk + rk) if (pk + rk) > 0 else 0
         nd = float(np.mean(results[k]["ndcg"])) if results[k]["ndcg"] else 0
         metrics[f"K{k}"] = {
-            "precision": round(pk*100, 1),
-            "recall":    round(rk*100, 1),
-            "f1":        round(f1*100, 1),
-            "ndcg":      round(nd*100, 1),
+            "precision": round(pk * 100, 1),
+            "recall": round(rk * 100, 1),
+            "f1": round(f1 * 100, 1),
+            "ndcg": round(nd * 100, 1),
         }
 
     return {
-        "model":       engine.model_label,
+        "model": engine.model_label,
         "sample_size": len(sample),
-        "metrics":     metrics,
-        "latency_ms":  round((time.time() - t0) * 1000, 2),
+        "metrics": metrics,
+        "latency_ms": round((time.time() - t0) * 1000, 2),
     }
 
 
@@ -763,6 +748,7 @@ SCORE_WEIGHTS = {
 def _direct_mysql_event(
     user_id: str, event_type: str, category: str,
     brand: str, price_range: str, product_name: str = "",
+    email: str = ""
 ):
     """
     Write event directly to MySQL — mirrors what consumer.py does.
@@ -791,6 +777,13 @@ def _direct_mysql_event(
                 INSERT INTO identities (core_id, identifier_type, identifier_value)
                 VALUES (%s, 'user_id', %s)
             """, (core_id, user_id))
+
+        if email and email.strip():
+            cursor.execute("UPDATE users SET email = %s WHERE core_id = %s", (email, core_id))
+            cursor.execute("""
+                INSERT IGNORE INTO identities (core_id, identifier_type, identifier_value)
+                VALUES (%s, 'email', %s)
+            """, (core_id, email))
 
         # Log interaction
         cursor.execute("""
