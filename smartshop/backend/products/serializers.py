@@ -4,7 +4,7 @@ from .models import Product, Category, ProductFeature
 class CategorySerializer(serializers.ModelSerializer):
     class Meta:
         model = Category
-        fields = ['id', 'name', 'slug', 'description', 'emoji', 'image_url']
+        fields = ['id', 'name', 'slug', 'description', 'emoji', 'image_url', 'cprp_category']
 
 class ProductFeatureSerializer(serializers.ModelSerializer):
     class Meta:
@@ -22,7 +22,7 @@ class ProductSerializer(serializers.ModelSerializer):
             'id', 'name', 'slug', 'description', 'category', 'brand',
             'price', 'compare_price', 'discount_percent', 'stock_quantity',
             'image_url', 'emoji', 'is_active', 'rating', 'review_count',
-            'features', 'created_at'
+            'features', 'created_at', 'cprp_brand', 'cprp_price_range'
         ]
 
     def get_discount_percent(self, obj):
@@ -40,7 +40,7 @@ class ProductListSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'name', 'slug', 'brand', 'price', 'compare_price',
             'discount_percent', 'image_url', 'emoji', 'rating', 'review_count',
-            'stock_quantity', 'category'
+            'stock_quantity', 'category', 'cprp_brand', 'cprp_price_range'
         ]
 
     def get_discount_percent(self, obj):
