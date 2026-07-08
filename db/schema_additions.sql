@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS recommendation_log (
     main_category    VARCHAR(100) NOT NULL,
     brand            VARCHAR(100) DEFAULT "unknown",
     price_range      VARCHAR(50)  DEFAULT "unknown",
-    epsilon_score    FLOAT DEFAULT 0.0,
+    partner_score    FLOAT DEFAULT 0.0,
     rank_position    INT DEFAULT 1,
     trigger_type     VARCHAR(50) DEFAULT "api",   -- api/timeline/interest
     outcome          VARCHAR(50) DEFAULT "shown", -- shown/clicked/purchased/ignored/dismissed
